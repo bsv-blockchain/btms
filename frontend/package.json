@@ -1,0 +1,65 @@
+{
+  "name": "btms-ui-react",
+  "description": "BTMS UI.",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "@bsv/btms-core": "file:../core",
+    "@bsv/message-box-client": "^1.4.5",
+    "@bsv/sdk": "^1.8.13",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^5.15.15",
+    "@mui/material": "^5.15.15",
+    "@mui/styles": "^6.5.0",
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.11.0",
+    "metanet-identity-react": "^0.1.42",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native-web": "^0.21.2",
+    "react-router": "^5.3.4",
+    "react-router-dom": "^5.3.4",
+    "react-toastify": "^11.0.5",
+    "use-async-effect": "^2.2.7",
+    "zustand": "^4.5.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@types/react": "18.3.1",
+    "@types/react-dom": "18.3.1",
+    "@types/react-router-dom": "^5.3.3",
+    "@typescript-eslint/eslint-plugin": "^6.20.0",
+    "@typescript-eslint/parser": "^6.20.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "sass": "^1.72.0",
+    "standard": "^17.0.0",
+    "typescript": "^5.3.3",
+    "vite": "^6.0.0",
+    "@vitejs/plugin-react": "^4.0.0"
+  }
+}
