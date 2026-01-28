@@ -39,6 +39,9 @@
 // Main class
 export { BTMS } from './BTMS.js'
 
+// Advanced extension class
+export { BTMSAdvanced } from './BTMSAdvanced.js'
+
 // Token encoding/decoding
 export { BTMSToken } from './BTMSToken.js'
 
@@ -70,6 +73,11 @@ export type {
   ChangeStrategy,
   ChangeStrategyType,
   ChangeStrategyOptions,
+
+  // Multi-transaction transfer types
+  TransferSplitOptions,
+  TransferTransaction,
+  MultiTransactionTransfer,
 
   // Operation result types
   IssueResult,
@@ -110,3 +118,6 @@ export {
   MAX_METADATA_LENGTH,
   getAssetBasket
 } from './constants.js'
+
+// Utilities
+export { extractKeyIDFromCustomInstructions } from './utils.js'

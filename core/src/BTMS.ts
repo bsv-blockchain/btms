@@ -28,10 +28,12 @@ import {
   LabelStringUnder300Bytes,
   OutputTagStringUnder300Bytes,
   PositiveIntegerOrZero,
-  Random
+  Random,
+  WalletProtocol
 } from '@bsv/sdk'
 
 import { BTMSToken } from './BTMSToken.js'
+import { extractKeyIDFromCustomInstructions } from './utils.js'
 import type {
   BTMSConfig,
   ResolvedBTMSConfig,
@@ -49,8 +51,6 @@ import type {
   VerifyOwnershipResult,
   SelectionOptions,
   SelectionResult,
-  ChangeStrategy,
-  ChangeStrategyType,
   ChangeStrategyOptions,
   ChangeContext,
   ChangeOutput
@@ -66,6 +66,8 @@ import {
   ISSUE_MARKER,
   getAssetBasket
 } from './constants.js'
+
+const BTMS_PROTOCOL: WalletProtocol = [0, 'p btms']
 
 /**
  * BTMS - Basic Token Management System
@@ -100,8 +102,7 @@ export class BTMS {
     this.config = this.resolveConfig(config)
     this.tokenTemplate = new BTMSToken(
       this.config.wallet,
-      this.config.protocolID,
-      this.config.keyID,
+      BTMS_PROTOCOL,
       this.originator
     )
   }
@@ -115,8 +116,7 @@ export class BTMS {
     // Recreate token template with new originator
     this.tokenTemplate = new BTMSToken(
       this.config.wallet,
-      this.config.protocolID,
-      this.config.keyID,
+      BTMS_PROTOCOL,
       this.originator
     )
   }
@@ -141,7 +141,7 @@ export class BTMS {
    * const result = await btms.issue(1000000, {
    *   name: 'GOLD',
    *   description: 'Represents 1 gram of gold',
-   *   iconURL: 'https://example.com/gold.png'
+   *   iconURL: 'https://example.com/gold.png' or a UHRP url
    * })
    * console.log('Asset ID:', result.assetId) // e.g., 'abc123...def.0'
    * ```
@@ -300,9 +300,9 @@ export class BTMS {
       const basket = getAssetBasket(assetId)
 
       // Generate random derivation for recipient output
-      const paymentDerivationPrefix = Utils.toBase64(Random(32))
+      const transferDerivationPrefix = Utils.toBase64(Random(32))
       const recipientDerivationSuffix = Utils.toBase64(Random(32))
-      const recipientKeyID = `${paymentDerivationPrefix} ${recipientDerivationSuffix}`
+      const recipientKeyID = `${transferDerivationPrefix} ${recipientDerivationSuffix}`
 
       // Recipient output
       const recipientScript = await this.tokenTemplate.createTransfer(
@@ -318,7 +318,7 @@ export class BTMS {
         satoshis: this.config.tokenSatoshis,
         lockingScript: recipientScriptHex,
         customInstructions: JSON.stringify({
-          derivationPrefix: paymentDerivationPrefix,
+          derivationPrefix: transferDerivationPrefix,
           derivationSuffix: recipientDerivationSuffix
         }),
         outputDescription: `Send ${amount} tokens`,
@@ -341,7 +341,7 @@ export class BTMS {
         // Create each change output
         for (const changeOutput of changeOutputs) {
           const changeDerivationSuffix = Utils.toBase64(Random(32))
-          const changeKeyID = `${paymentDerivationPrefix} ${changeDerivationSuffix}`
+          const changeKeyID = `${transferDerivationPrefix} ${changeDerivationSuffix}`
 
           const changeScript = await this.tokenTemplate.createTransfer(
             assetId,
@@ -355,10 +355,10 @@ export class BTMS {
             satoshis: this.config.tokenSatoshis,
             lockingScript: changeScript.toHex(),
             customInstructions: JSON.stringify({
-              derivationPrefix: paymentDerivationPrefix,
+              derivationPrefix: transferDerivationPrefix,
               derivationSuffix: changeDerivationSuffix
             }),
-            basket,
+            basket, // We put our change tokens back in our basket
             outputDescription: `Change: ${changeOutput.amount} tokens`,
             tags: ['btms_change'] as OutputTagStringUnder300Bytes[]
           })
@@ -397,20 +397,7 @@ export class BTMS {
       const spends: Record<number, { unlockingScript: string }> = {}
       for (let i = 0; i < selected.length; i++) {
         const utxo = selected[i]
-
-        // Extract keyID from customInstructions
-        let keyID: string | undefined
-        if (utxo.customInstructions) {
-          try {
-            const instructions = JSON.parse(utxo.customInstructions)
-            if (instructions.derivationPrefix && instructions.derivationSuffix) {
-              keyID = `${instructions.derivationPrefix} ${instructions.derivationSuffix}`
-            }
-          } catch {
-            // Invalid customInstructions, will attempt to use default keyID
-          }
-        }
-
+        const keyID = extractKeyIDFromCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
         const unlocker = this.tokenTemplate.createUnlocker('self', keyID)
         const unlockingScript = await unlocker.sign(txForSigning, i)
         spends[i] = { unlockingScript: unlockingScript.toHex() }
@@ -448,7 +435,7 @@ export class BTMS {
         satoshis: this.config.tokenSatoshis,
         beef: signResult.tx,
         customInstructions: JSON.stringify({
-          derivationPrefix: paymentDerivationPrefix,
+          derivationPrefix: transferDerivationPrefix,
           derivationSuffix: recipientDerivationSuffix
         }),
         assetId,
@@ -819,13 +806,15 @@ export class BTMS {
       const provenTokens: ProvenToken[] = []
 
       for (const utxo of selected) {
+        const keyID = extractKeyIDFromCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+
         // Reveal specific key linkage for this token
         // The counterparty is 'self' for tokens we own (resolved to our own key)
         const linkageResult = await this.config.wallet.revealSpecificKeyLinkage({
           counterparty: prover, // Self-owned tokens use our own key as counterparty
           verifier,
-          protocolID: this.config.protocolID,
-          keyID: this.config.keyID
+          protocolID: BTMS_PROTOCOL,
+          keyID
         }, this.originator)
 
         provenTokens.push({
@@ -926,9 +915,9 @@ export class BTMS {
           ciphertext: provenToken.linkage.encryptedLinkage,
           protocolID: [
             2,
-            `specific linkage revelation ${this.config.protocolID[0]} ${this.config.protocolID[1]}`
+            `specific linkage revelation ${BTMS_PROTOCOL[0]} ${BTMS_PROTOCOL[1]}`
           ],
-          keyID: this.config.keyID,
+          keyID: '1', // Standard keyID for linkage verification
           counterparty: proof.prover
         }, this.originator)
 
@@ -971,14 +960,14 @@ export class BTMS {
   }
 
   /**
-   * Lookup a token on the overlay to verify it exists.
+   * Lookup a token on the overlay network.
    * 
    * @param txid - Transaction ID
    * @param outputIndex - Output index
    * @param includeBeef - Whether to return BEEF data
    * @returns Whether the token was found and optionally the BEEF
    */
-  private async lookupTokenOnOverlay(
+  protected async lookupTokenOnOverlay(
     txid: TXIDHexString,
     outputIndex: number,
     includeBeef = false
@@ -1301,8 +1290,6 @@ export class BTMS {
       networkPreset: config.networkPreset ?? 'mainnet',
       overlayHosts: config.overlayHosts ?? [],
       tokenSatoshis: config.tokenSatoshis ?? DEFAULT_TOKEN_SATOSHIS,
-      protocolID: config.protocolID ?? BTMS_PROTOCOL_ID,
-      keyID: config.keyID ?? BTMS_KEY_ID,
       comms: config.comms,
       messageBox: config.messageBox ?? 'btms_tokens'
     }

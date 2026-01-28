@@ -47,18 +47,15 @@ import { BTMS_PROTOCOL_ID, BTMS_KEY_ID, ISSUE_MARKER, MIN_TOKEN_AMOUNT, MAX_TOKE
 export class BTMSToken {
   private wallet: WalletInterface
   private protocolID: WalletProtocol
-  private keyID: string
   private originator?: string
 
   constructor(
     wallet?: WalletInterface,
-    protocolID: WalletProtocol = BTMS_PROTOCOL_ID,
-    keyID: string = BTMS_KEY_ID,
+    protocolID: WalletProtocol = [0, 'btms tokens'],
     originator?: string
   ) {
     this.wallet = wallet ?? new WalletClient()
     this.protocolID = protocolID
-    this.keyID = keyID
     this.originator = originator
   }
 
@@ -135,13 +132,13 @@ export class BTMSToken {
    * Create an unlocking script template for spending a BTMS token.
    * 
    * @param counterparty - The counterparty used when the token was created
-   * @param keyID - Optional key ID for derivation (defaults to instance keyID)
+   * @param keyID - Key ID for derivation from customInstructions
    * @returns An unlocker that can sign transactions
    */
-  createUnlocker(counterparty: WalletCounterparty = 'self', keyID?: string) {
+  createUnlocker(counterparty: WalletCounterparty = 'self', keyID: string) {
     return new PushDrop(this.wallet, this.originator).unlock(
       this.protocolID,
-      keyID ?? this.keyID,
+      keyID,
       counterparty
     )
   }

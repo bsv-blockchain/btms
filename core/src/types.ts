@@ -209,6 +209,56 @@ export interface ChangeStrategyOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Transfer Strategy Types (Multi-Transaction Privacy)
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents a single transaction in a multi-transaction transfer
+ */
+export interface TransferTransaction {
+  /** Transaction ID */
+  txid: TXIDHexString
+  /** Output index for the recipient's token */
+  outputIndex: number
+  /** Token amount in this transaction */
+  amount: number
+  /** Locking script for the recipient's output */
+  lockingScript: HexString
+  /** Derivation suffix for this specific output */
+  derivationSuffix: string
+}
+
+/**
+ * Options for splitting transfers across multiple transactions
+ */
+export interface TransferSplitOptions {
+  /** Number of transactions to split across (default: 1 = no split) */
+  transactionCount?: number
+  /** How to distribute amounts across transactions */
+  distribution?: 'equal' | 'random'
+  /** Minimum amount per transaction (default: 1) */
+  minAmountPerTx?: number
+}
+
+/**
+ * Token transfer data for recipient (supports multi-transaction transfers)
+ */
+export interface MultiTransactionTransfer {
+  /** Shared derivation prefix for all outputs in this transfer */
+  derivationPrefix: string
+  /** Asset being transferred */
+  assetId: string
+  /** Total amount across all transactions */
+  totalAmount: number
+  /** Asset metadata */
+  metadata?: string
+  /** Individual transactions in this transfer */
+  transactions: TransferTransaction[]
+  /** Merged BEEF containing all transactions */
+  beef: AtomicBEEF
+}
+
+// ---------------------------------------------------------------------------
 // Token Output Types
 // ---------------------------------------------------------------------------
 
@@ -357,8 +407,6 @@ export interface ResolvedBTMSConfig {
   networkPreset: 'local' | 'mainnet' | 'testnet'
   overlayHosts: string[]
   tokenSatoshis: SatoshiValue
-  protocolID: WalletProtocol
-  keyID: KeyIDStringUnder800Bytes
   comms?: CommsLayer
   messageBox: string
 }
