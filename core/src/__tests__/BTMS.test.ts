@@ -1056,4 +1056,144 @@ describe('Ownership Proof', () => {
       }
     })
   })
+
+  describe('accept', () => {
+    it('should throw error when token not on overlay and broadcast fails', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock lookupTokenOnOverlay to return not found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: false })
+
+      // Mock TopicBroadcaster to fail
+      const mockBroadcast = jest.fn().mockResolvedValue({ status: 'error', description: 'Network error' })
+      jest.mock('@bsv/sdk', () => ({
+        ...jest.requireActual('@bsv/sdk'),
+        TopicBroadcaster: jest.fn().mockImplementation(() => ({
+          broadcast: mockBroadcast
+        }))
+      }))
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        beef: createMockAtomicBEEF(MOCK_TXID),
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      }
+
+      // Mock BTMSToken.decode to return valid
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: `${MOCK_TXID}.0`,
+        amount: 100,
+        metadata: undefined
+      })
+
+      try {
+        await expect(btms.accept(incomingToken)).rejects.toThrow('Token not found on overlay and broadcast failed!')
+      } finally {
+        // Restore mocks
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+        BTMSToken.decode = originalDecode
+      }
+    })
+
+    it('should succeed when token is found on overlay', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock lookupTokenOnOverlay to return found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        beef: createMockAtomicBEEF(MOCK_TXID),
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      }
+
+      // Mock BTMSToken.decode to return valid
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: `${MOCK_TXID}.0`,
+        amount: 100,
+        metadata: undefined
+      })
+
+      try {
+        const result = await btms.accept(incomingToken)
+        expect(result.success).toBe(true)
+        expect(result.assetId).toBe(`${MOCK_TXID}.0`)
+        expect(result.amount).toBe(100)
+        expect(mockWallet.calls.internalizeAction).toHaveLength(1)
+      } finally {
+        // Restore mocks
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+        BTMSToken.decode = originalDecode
+      }
+    })
+
+    it('should re-broadcast when token not on overlay but broadcast succeeds', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock lookupTokenOnOverlay to return not found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: false })
+
+      // Mock successful broadcast
+      const mockBroadcast = jest.fn().mockResolvedValue({ status: 'success' })
+      const TopicBroadcasterMock = jest.fn().mockImplementation(() => ({
+        broadcast: mockBroadcast
+      }))
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        beef: createMockAtomicBEEF(MOCK_TXID),
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      }
+
+      // Mock BTMSToken.decode to return valid
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: `${MOCK_TXID}.0`,
+        amount: 100,
+        metadata: undefined
+      })
+
+      try {
+        const result = await btms.accept(incomingToken)
+        expect(result.success).toBe(true)
+        expect(mockWallet.calls.internalizeAction).toHaveLength(1)
+      } finally {
+        // Restore mocks
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+        BTMSToken.decode = originalDecode
+      }
+    })
+  })
 })

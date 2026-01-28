@@ -16,9 +16,9 @@ class BTMSLookupService implements LookupService {
   private static readonly TOPIC = 'tm_btms'
   private static readonly SERVICE_ID = 'ls_btms'
 
-  constructor (public storageManager: BTMSStorageManager) { }
+  constructor(public storageManager: BTMSStorageManager) { }
 
-  async outputAdmittedByTopic (payload: OutputAdmittedByTopic): Promise<void> {
+  async outputAdmittedByTopic(payload: OutputAdmittedByTopic): Promise<void> {
     if (payload.mode !== 'locking-script') {
       throw new Error('Invalid payload mode')
     }
@@ -32,8 +32,8 @@ class BTMSLookupService implements LookupService {
       const decoded = PushDrop.decode(lockingScript)
 
       // BTMS tokens have 2-3 fields: [assetId, amount, metadata?]
-      if (decoded.fields.length < 2 || decoded.fields.length > 3) {
-        throw new Error(`BTMS token must have 2-3 fields, got ${decoded.fields.length}`)
+      if (decoded.fields.length < 3 || decoded.fields.length > 4) {
+        throw new Error(`BTMS token must have 2-3 fields + signature, got ${decoded.fields.length}`)
       }
 
       const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
@@ -69,7 +69,7 @@ class BTMSLookupService implements LookupService {
     }
   }
 
-  async outputSpent (payload: OutputSpent): Promise<void> {
+  async outputSpent(payload: OutputSpent): Promise<void> {
     if (payload.mode !== 'none') throw new Error('Invalid payload mode')
     const { topic, txid, outputIndex } = payload
     if (topic !== BTMSLookupService.TOPIC) return
@@ -77,11 +77,11 @@ class BTMSLookupService implements LookupService {
     await this.storageManager.deleteRecord(txid, outputIndex)
   }
 
-  async outputEvicted (txid: string, outputIndex: number): Promise<void> {
+  async outputEvicted(txid: string, outputIndex: number): Promise<void> {
     await this.storageManager.deleteRecord(txid, outputIndex)
   }
 
-  async lookup (question: LookupQuestion): Promise<LookupFormula> {
+  async lookup(question: LookupQuestion): Promise<LookupFormula> {
     if (question.query === undefined || question.query === null) {
       throw new Error('A valid query must be provided')
     }
@@ -134,7 +134,7 @@ class BTMSLookupService implements LookupService {
   /**
    * History selector for determining which outputs to include in chain tracking
    */
-  private async historySelector (beef: number[], outputIndex: number, assetId?: string): Promise<boolean> {
+  private async historySelector(beef: number[], outputIndex: number, assetId?: string): Promise<boolean> {
     try {
       const tx = Transaction.fromBEEF(beef)
       const decoded = PushDrop.decode(tx.outputs[outputIndex].lockingScript)
@@ -158,11 +158,11 @@ class BTMSLookupService implements LookupService {
     }
   }
 
-  async getDocumentation (): Promise<string> {
+  async getDocumentation(): Promise<string> {
     return docs
   }
 
-  async getMetaData (): Promise<{
+  async getMetaData(): Promise<{
     name: string
     shortDescription: string
     iconURL?: string

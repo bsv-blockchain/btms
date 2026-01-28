@@ -81,7 +81,7 @@ class BTMSFrontend {
     this.core = new BTMSCore({
       wallet,
       comms,
-      networkPreset: 'mainnet',
+      networkPreset: 'local',
       messageBox: 'btms_tokens'
     })
   }

@@ -27,7 +27,8 @@ import {
   OutpointString,
   LabelStringUnder300Bytes,
   OutputTagStringUnder300Bytes,
-  PositiveIntegerOrZero
+  PositiveIntegerOrZero,
+  Random
 } from '@bsv/sdk'
 
 import { BTMSToken } from './BTMSToken.js'
@@ -41,11 +42,13 @@ import type {
   SendResult,
   AcceptResult,
   TokenForRecipient,
-  IncomingPayment,
+  IncomingToken,
   OwnershipProof,
   ProvenToken,
   ProveOwnershipResult,
-  VerifyOwnershipResult
+  VerifyOwnershipResult,
+  SelectionOptions,
+  SelectionResult
 } from './types.js'
 import {
   BTMS_TOPIC,
@@ -93,7 +96,8 @@ export class BTMS {
     this.tokenTemplate = new BTMSToken(
       this.config.wallet,
       this.config.protocolID,
-      this.config.keyID
+      this.config.keyID,
+      this.originator
     )
   }
 
@@ -103,6 +107,13 @@ export class BTMS {
    */
   setOriginator(originator: string): void {
     this.originator = originator
+    // Recreate token template with new originator
+    this.tokenTemplate = new BTMSToken(
+      this.config.wallet,
+      this.config.protocolID,
+      this.config.keyID,
+      this.originator
+    )
   }
 
   // ---------------------------------------------------------------------------
@@ -132,8 +143,13 @@ export class BTMS {
    */
   async issue(amount: number, metadata?: BTMSAssetMetadata): Promise<IssueResult> {
     try {
+      // Generate random derivation keys for privacy
+      const derivationPrefix = Utils.toBase64(Random(32))
+      const derivationSuffix = Utils.toBase64(Random(32))
+      const keyID = `${derivationPrefix} ${derivationSuffix}`
+
       // Create the issuance locking script
-      const lockingScript = await this.tokenTemplate.createIssuance(amount, metadata)
+      const lockingScript = await this.tokenTemplate.createIssuance(amount, keyID, metadata)
       const lockingScriptHex = lockingScript.toHex()
 
       const tokenName = metadata?.name ?? 'tokens'
@@ -146,6 +162,10 @@ export class BTMS {
           {
             satoshis: this.config.tokenSatoshis,
             lockingScript: lockingScriptHex,
+            customInstructions: JSON.stringify({
+              derivationPrefix,
+              derivationSuffix
+            }),
             outputDescription: `Issue ${amount} ${tokenName}`,
             tags: ['btms_issue'] as OutputTagStringUnder300Bytes[]
           }
@@ -173,7 +193,14 @@ export class BTMS {
         outputs: [{
           outputIndex: 0 as PositiveIntegerOrZero,
           protocol: 'basket insertion',
-          insertionRemittance: { basket }
+          insertionRemittance: {
+            basket,
+            customInstructions: JSON.stringify({
+              derivationPrefix,
+              derivationSuffix
+            }),
+            tags: ['btms_issue'] as OutputTagStringUnder300Bytes[]
+          }
         }],
         labels: [BTMS_LABEL],
         description: `Issue ${amount} ${tokenName}`
@@ -238,34 +265,21 @@ export class BTMS {
       const senderKey = await this.getIdentityKey()
 
       // Fetch spendable UTXOs for this asset
-      const utxos = await this.getSpendableTokens(assetId)
+      const { tokens: utxos } = await this.getSpendableTokens(assetId)
 
       if (utxos.length === 0) {
         throw new Error(`No spendable tokens found for asset ${assetId}`)
       }
 
-      // Select UTXOs to cover the amount (greedy: largest first)
-      const { selected, totalInput } = BTMS.selectUTXOs(utxos, amount)
+      // Select and verify UTXOs on the overlay
+      const { selected, totalInput, inputBeef } = await this.selectAndVerifyUTXOs(utxos, amount)
 
       if (totalInput < amount) {
-        throw new Error(`Insufficient balance. Have ${totalInput}, need ${amount}`)
+        throw new Error(`Insufficient balance on overlay. Have ${totalInput}, need ${amount}`)
       }
 
       // Get metadata from first selected UTXO (must be consistent)
       const metadata = selected[0].token.metadata
-
-      // Build BEEF from selected UTXOs
-      const beefResult = await this.config.wallet.listOutputs({
-        basket: getAssetBasket(assetId),
-        include: 'entire transactions',
-        limit: 1000
-      }, this.originator)
-
-      if (!beefResult.BEEF) {
-        throw new Error('Failed to get BEEF for token UTXOs')
-      }
-
-      const beefObj = Beef.fromBinary(Utils.toArray(beefResult.BEEF))
 
       // Determine if sending to self
       const isSendingToSelf = senderKey === recipient
@@ -274,18 +288,28 @@ export class BTMS {
       const outputs: CreateActionOutput[] = []
       const basket = getAssetBasket(assetId)
 
+      // Generate random derivation for recipient output
+      const paymentDerivationPrefix = Utils.toBase64(Random(32))
+      const recipientDerivationSuffix = Utils.toBase64(Random(32))
+      const recipientKeyID = `${paymentDerivationPrefix} ${recipientDerivationSuffix}`
+
       // Recipient output
       const recipientScript = await this.tokenTemplate.createTransfer(
         assetId,
         amount,
-        metadata,
-        isSendingToSelf ? 'self' : recipient
+        recipientKeyID,
+        isSendingToSelf ? 'self' : recipient,
+        metadata
       )
       const recipientScriptHex = recipientScript.toHex() as HexString
 
       outputs.push({
         satoshis: this.config.tokenSatoshis,
         lockingScript: recipientScriptHex,
+        customInstructions: JSON.stringify({
+          derivationPrefix: paymentDerivationPrefix,
+          derivationSuffix: recipientDerivationSuffix
+        }),
         outputDescription: `Send ${amount} tokens`,
         tags: ['btms_transfer'] as OutputTagStringUnder300Bytes[],
         ...(isSendingToSelf ? { basket } : {})
@@ -294,16 +318,25 @@ export class BTMS {
       // Change output (if needed)
       const changeAmount = totalInput - amount
       if (changeAmount > 0) {
+        // Generate random derivation for change output
+        const changeDerivationSuffix = Utils.toBase64(Random(32))
+        const changeKeyID = `${paymentDerivationPrefix} ${changeDerivationSuffix}`
+
         const changeScript = await this.tokenTemplate.createTransfer(
           assetId,
           changeAmount,
-          metadata,
-          'self'
+          changeKeyID,
+          'self',
+          metadata
         )
 
         outputs.push({
           satoshis: this.config.tokenSatoshis,
           lockingScript: changeScript.toHex(),
+          customInstructions: JSON.stringify({
+            derivationPrefix: paymentDerivationPrefix,
+            derivationSuffix: changeDerivationSuffix
+          }),
           basket,
           outputDescription: `Change: ${changeAmount} tokens`,
           tags: ['btms_change'] as OutputTagStringUnder300Bytes[]
@@ -317,11 +350,11 @@ export class BTMS {
         inputDescription: `Spend ${u.token.amount} tokens`
       }))
 
-      // Create the action
+      // Create the action with BEEF from overlay
       const createArgs: CreateActionArgs = {
         description: `Send ${amount} tokens to ${recipient.slice(0, 8)}...`,
         labels: [BTMS_LABEL as LabelStringUnder300Bytes],
-        inputBEEF: beefObj.toBinary(),
+        inputBEEF: inputBeef.toBinary(),
         inputs,
         outputs,
         options: {
@@ -336,12 +369,27 @@ export class BTMS {
         throw new Error('Failed to create signable transaction')
       }
 
-      // Sign all inputs
+      // Sign all inputs with their respective keyIDs
       const txForSigning = Transaction.fromAtomicBEEF(signableTransaction.tx)
-      const unlocker = this.tokenTemplate.createUnlocker('self')
 
       const spends: Record<number, { unlockingScript: string }> = {}
       for (let i = 0; i < selected.length; i++) {
+        const utxo = selected[i]
+
+        // Extract keyID from customInstructions
+        let keyID: string | undefined
+        if (utxo.customInstructions) {
+          try {
+            const instructions = JSON.parse(utxo.customInstructions)
+            if (instructions.derivationPrefix && instructions.derivationSuffix) {
+              keyID = `${instructions.derivationPrefix} ${instructions.derivationSuffix}`
+            }
+          } catch {
+            // Invalid customInstructions, will attempt to use default keyID
+          }
+        }
+
+        const unlocker = this.tokenTemplate.createUnlocker('self', keyID)
         const unlockingScript = await unlocker.sign(txForSigning, i)
         spends[i] = { unlockingScript: unlockingScript.toHex() }
       }
@@ -377,18 +425,20 @@ export class BTMS {
         amount,
         satoshis: this.config.tokenSatoshis,
         beef: signResult.tx,
-        keyID: this.config.keyID,
+        customInstructions: JSON.stringify({
+          derivationPrefix: paymentDerivationPrefix,
+          derivationSuffix: recipientDerivationSuffix
+        }),
         assetId,
         metadata
       }
 
       // Send to recipient via comms layer (if configured and not sending to self)
       if (this.config.comms && !isSendingToSelf) {
-        const body = JSON.stringify(tokenForRecipient)
         await this.config.comms.sendMessage({
           recipient,
           messageBox: this.config.messageBox,
-          body
+          body: JSON.stringify(tokenForRecipient)
         })
       }
 
@@ -418,7 +468,7 @@ export class BTMS {
    * @param assetId - Optional filter by asset ID
    * @returns List of incoming payments
    */
-  async listIncoming(assetId?: string): Promise<IncomingPayment[]> {
+  async listIncoming(assetId?: string): Promise<IncomingToken[]> {
     if (!this.config.comms) {
       return []
     }
@@ -427,10 +477,10 @@ export class BTMS {
       messageBox: this.config.messageBox
     })
 
-    const payments: IncomingPayment[] = []
+    const payments: IncomingToken[] = []
     for (const msg of messages) {
       try {
-        const payment = JSON.parse(msg.body) as IncomingPayment
+        const payment = JSON.parse(msg.body) as IncomingToken
         payment.messageId = msg.messageId
         payment.sender = msg.sender
 
@@ -447,79 +497,75 @@ export class BTMS {
   }
 
   /**
-   * Accept an incoming token payment.
+   * Accept an incoming token.
    * 
    * Verifies the token on the overlay, internalizes it into the wallet,
    * and acknowledges receipt via the messenger.
    * 
-   * @param payment - The incoming payment to accept
+   * @param token - The incoming token to accept
    * @returns Accept result
    */
-  async accept(payment: IncomingPayment): Promise<AcceptResult> {
+  async accept(token: IncomingToken): Promise<AcceptResult> {
     try {
       // Decode and validate the token
-      const decoded = BTMSToken.decode(payment.lockingScript)
+      const decoded = BTMSToken.decode(token.lockingScript)
       if (!decoded.valid) {
         throw new Error(`Invalid token: ${decoded.error}`)
       }
 
       // Verify the token exists on the overlay
-      const resolver = new LookupResolver({ networkPreset: this.config.networkPreset })
+      const { found: isOnOverlay } = await this.lookupTokenOnOverlay(token.txid, token.outputIndex)
 
-      let isOnOverlay = false
-      try {
-        const lookupResult = await resolver.query({
-          service: BTMS_LOOKUP_SERVICE,
-          query: { txid: payment.txid, outputIndex: payment.outputIndex }
-        })
-        isOnOverlay = lookupResult.type === 'output-list' && lookupResult.outputs.length > 0
-      } catch {
-        // Token not found, try to re-broadcast
-      }
-
-      // Re-broadcast if not on overlay
-      if (!isOnOverlay && payment.beef) {
-        const tx = Transaction.fromBEEF(payment.beef)
+      // Re-broadcast if token is not on overlay
+      if (!isOnOverlay && token.beef) {
+        const tx = Transaction.fromBEEF(token.beef)
         const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
           networkPreset: this.config.networkPreset
         })
-        await broadcaster.broadcast(tx)
+        const response = await broadcaster.broadcast(tx)
+        if (response.status !== 'success') {
+          throw new Error('Token not found on overlay and broadcast failed!')
+        }
       }
 
       // Internalize the token into the wallet
-      const basket = getAssetBasket(payment.assetId)
+      const basket = getAssetBasket(token.assetId)
 
       await this.config.wallet.internalizeAction({
-        tx: payment.beef,
+        tx: token.beef,
         labels: [BTMS_LABEL],
         outputs: [
           {
-            outputIndex: payment.outputIndex as PositiveIntegerOrZero,
+            outputIndex: token.outputIndex as PositiveIntegerOrZero,
             protocol: 'basket insertion',
-            insertionRemittance: { basket }
+            insertionRemittance: {
+              basket,
+              customInstructions: token.customInstructions,
+              tags: ['btms_received'] as OutputTagStringUnder300Bytes[]
+            }
           }
         ],
-        description: `Receive ${payment.amount} tokens`,
+        description: `Receive ${token.amount} tokens`,
         seekPermission: true
       }, this.originator)
 
       // Acknowledge receipt via comms layer
-      if (this.config.comms && payment.messageId) {
+      if (this.config.comms && token.messageId) {
         await this.config.comms.acknowledgeMessage({
-          messageIds: [payment.messageId]
+          messageIds: [token.messageId]
         })
       }
 
       return {
         success: true,
-        assetId: payment.assetId,
-        amount: payment.amount
+        assetId: token.assetId,
+        amount: token.amount
       }
     } catch (error) {
       return {
         success: false,
-        assetId: payment.assetId,
-        amount: payment.amount,
+        assetId: token.assetId,
+        amount: token.amount,
         error: error instanceof Error ? error.message : 'Unknown error'
       }
     }
@@ -536,7 +582,7 @@ export class BTMS {
    * @returns Total spendable balance
    */
   async getBalance(assetId: string): Promise<number> {
-    const utxos = await this.getSpendableTokens(assetId)
+    const { tokens: utxos } = await this.getSpendableTokens(assetId)
     return utxos.reduce((sum, u) => sum + u.token.amount, 0)
   }
 
@@ -555,6 +601,7 @@ export class BTMS {
         includeOutputs: true,
         limit: 10000
       }, this.originator)
+      debugger
 
       const basketPrefix = BTMS_BASKET_PREFIX + ' '
       for (const action of actionsResult.actions) {
@@ -571,20 +618,20 @@ export class BTMS {
       // Ignore errors in discovery
     }
 
-    // Also check incoming payments
+    // Get all incoming payments once (used for both discovery and per-asset checks)
+    const allIncoming: IncomingToken[] = []
     if (this.config.comms) {
       try {
-        const incoming = await this.config.comms.listMessages({
+        const messages = await this.config.comms.listMessages({
           messageBox: this.config.messageBox
         })
-
-        for (const msg of incoming) {
+        for (const msg of messages) {
           try {
-            const payment = JSON.parse(msg.body) as IncomingPayment
+            const payment = JSON.parse(msg.body) as IncomingToken
             payment.messageId = msg.messageId
             payment.sender = msg.sender
-
-            // Filter by assetId if provided
+            allIncoming.push(payment)
+            // Also add to discovered assets
             if (BTMSToken.isValidAssetId(payment.assetId)) {
               assetIds.add(payment.assetId)
             }
@@ -601,8 +648,9 @@ export class BTMS {
     const assets: BTMSAsset[] = []
 
     for (const assetId of assetIds) {
-      const balance = await this.getBalance(assetId)
-      const utxos = await this.getSpendableTokens(assetId)
+      // Single call to get UTXOs (used for both balance and metadata)
+      const { tokens: utxos } = await this.getSpendableTokens(assetId)
+      const balance = utxos.reduce((sum, u) => sum + u.token.amount, 0)
 
       // Extract metadata from first UTXO
       let metadata: BTMSAssetMetadata | undefined
@@ -614,12 +662,9 @@ export class BTMS {
         }
       }
 
-      // Check for pending incoming
-      let hasPendingIncoming = false
-      if (this.config.comms) {
-        const incoming = await this.listIncoming(assetId)
-        hasPendingIncoming = incoming.length > 0
-      }
+      // Check for pending incoming (filter from already-fetched list)
+      const incomingForAsset = allIncoming.filter(p => p.assetId === assetId)
+      const hasPendingIncoming = incomingForAsset.length > 0
 
       // Only include assets with balance or pending incoming
       if (balance > 0 || hasPendingIncoming) {
@@ -640,28 +685,40 @@ export class BTMS {
    * Get all spendable token UTXOs for an asset.
    * 
    * @param assetId - The asset to query
-   * @returns List of spendable token outputs
+   * @param includeBeef - Whether to include full transaction data (for spending)
+   * @returns List of spendable token outputs and optional BEEF
    */
-  async getSpendableTokens(assetId: string): Promise<BTMSTokenOutput[]> {
+  async getSpendableTokens(
+    assetId: string,
+    includeBeef = false
+  ): Promise<{ tokens: BTMSTokenOutput[], beef?: Beef }> {
     const basket = getAssetBasket(assetId)
 
     const result: ListOutputsResult = await this.config.wallet.listOutputs({
       basket,
-      include: 'locking scripts',
+      include: includeBeef ? 'entire transactions' : 'locking scripts',
       includeTags: true,
+      includeCustomInstructions: true,
       limit: 10000
     }, this.originator)
 
     const tokens: BTMSTokenOutput[] = []
 
+    console.log('[BTMS] getSpendableTokens basket:', basket, 'found', result.outputs.length, 'outputs')
+
     for (const output of result.outputs) {
+      console.log('[BTMS] checking output:', output.outpoint, 'spendable:', output.spendable, 'satoshis:', output.satoshis)
       if (!output.spendable) continue
       if (output.satoshis !== this.config.tokenSatoshis) continue
 
       const scriptHex = (output as any).lockingScript
-      if (!scriptHex) continue
+      if (!scriptHex) {
+        console.log('[BTMS] no lockingScript')
+        continue
+      }
 
       const decoded = BTMSToken.decode(scriptHex)
+      console.log('[BTMS] decode result:', decoded.valid ? 'valid' : decoded.error)
       if (!decoded.valid) continue
 
       // For transfer outputs, verify the assetId matches
@@ -676,12 +733,14 @@ export class BTMS {
         outputIndex,
         satoshis: output.satoshis,
         lockingScript: scriptHex as HexString,
+        customInstructions: output.customInstructions,
         token: decoded,
         spendable: true
       })
     }
 
-    return tokens
+    const beef = includeBeef && result.BEEF ? Beef.fromBinary(Utils.toArray(result.BEEF)) : undefined
+    return { tokens, beef }
   }
 
   // ---------------------------------------------------------------------------
@@ -723,7 +782,7 @@ export class BTMS {
       const prover = await this.getIdentityKey()
 
       // Get spendable tokens for this asset
-      const utxos = await this.getSpendableTokens(assetId)
+      const { tokens: utxos } = await this.getSpendableTokens(assetId)
       if (utxos.length === 0) {
         throw new Error(`No tokens found for asset ${assetId}`)
       }
@@ -894,12 +953,14 @@ export class BTMS {
    * 
    * @param txid - Transaction ID
    * @param outputIndex - Output index
-   * @returns Whether the token was found
+   * @param includeBeef - Whether to return BEEF data
+   * @returns Whether the token was found and optionally the BEEF
    */
   private async lookupTokenOnOverlay(
     txid: TXIDHexString,
-    outputIndex: number
-  ): Promise<{ found: boolean }> {
+    outputIndex: number,
+    includeBeef = false
+  ): Promise<{ found: boolean; beef?: Beef }> {
     try {
       const lookup = new LookupResolver({ networkPreset: this.config.networkPreset })
       const result = await lookup.query({
@@ -908,8 +969,9 @@ export class BTMS {
       })
 
       // Check if we got a valid result
-      if (result && result.outputs && result.outputs.length > 0) {
-        return { found: true }
+      if (result.type === 'output-list' && result.outputs.length > 0) {
+        const beef = includeBeef ? Beef.fromBinary(result.outputs[0].beef) : undefined
+        return { found: true, beef }
       }
       return { found: false }
     } catch {
@@ -941,36 +1003,148 @@ export class BTMS {
     return BTMSToken.decode(lockingScript)
   }
 
+  /**
+   * Select and verify UTXOs on the overlay.
+   * 
+   * Selects UTXOs first using the specified strategy, then verifies only
+   * the selected ones on the overlay. If any fail verification, retries
+   * with remaining UTXOs.
+   * 
+   * @param utxos - Available UTXOs to select from
+   * @param amount - Target amount to cover
+   * @param options - Selection options including strategy
+   * @returns Selected UTXOs, total input, and merged BEEF from overlay
+   */
+  async selectAndVerifyUTXOs(
+    utxos: BTMSTokenOutput[],
+    amount: number,
+    options: SelectionOptions = {}
+  ): Promise<{ selected: BTMSTokenOutput[]; totalInput: number; inputBeef: Beef }> {
+    const inputBeef = new Beef()
+    let remainingUtxos = [...utxos]
+
+    while (remainingUtxos.length > 0) {
+      // Select UTXOs using the specified strategy
+      const { selected, totalInput } = BTMS.selectUTXOs(remainingUtxos, amount, options)
+
+      if (selected.length === 0 || totalInput < amount) {
+        // Not enough UTXOs available
+        return { selected: [], totalInput: 0, inputBeef }
+      }
+
+      // Verify only the selected UTXOs on overlay
+      const verificationPromises = selected.map(async (utxo) => {
+        const { found, beef } = await this.lookupTokenOnOverlay(utxo.txid, utxo.outputIndex, true)
+        return { utxo, found, beef }
+      })
+
+      const verificationResults = await Promise.all(verificationPromises)
+
+      // Separate valid and invalid UTXOs
+      const validResults = verificationResults.filter(r => r.found)
+      const invalidUtxos = verificationResults.filter(r => !r.found).map(r => r.utxo)
+
+      // Merge BEEF from valid UTXOs
+      for (const result of validResults) {
+        if (result.beef) {
+          inputBeef.mergeBeef(result.beef)
+        }
+      }
+
+      // If all selected UTXOs are valid, we're done
+      if (invalidUtxos.length === 0) {
+        return {
+          selected: validResults.map(r => r.utxo),
+          totalInput,
+          inputBeef
+        }
+      }
+
+      // Some UTXOs failed verification - remove them and retry
+      remainingUtxos = remainingUtxos.filter(
+        u => !invalidUtxos.some(invalid => invalid.outpoint === u.outpoint)
+      )
+    }
+
+    // Token supply exhausted
+    return { selected: [], totalInput: 0, inputBeef }
+  }
+
   // ---------------------------------------------------------------------------
   // Static Methods
   // ---------------------------------------------------------------------------
 
   /**
-   * Select UTXOs to cover a target amount using a greedy algorithm.
-   * 
-   * Sorts UTXOs by amount descending (largest first) and selects
-   * until the total meets or exceeds the target amount.
+   * Select UTXOs to cover a target amount using a configurable strategy.
    * 
    * @param utxos - Available UTXOs to select from
    * @param amount - Target amount to cover
-   * @returns Selected UTXOs and total input amount
+   * @param options - Selection options including strategy
+   * @returns Selected UTXOs, total input amount, and excluded UTXOs
    */
   static selectUTXOs<T extends { token: { amount: number } }>(
     utxos: T[],
-    amount: number
-  ): { selected: T[]; totalInput: number } {
-    // Sort by amount descending (largest first)
-    const sorted = [...utxos].sort((a, b) => b.token.amount - a.token.amount)
+    amount: number,
+    options: SelectionOptions = {}
+  ): SelectionResult<T> {
+    const {
+      strategy = 'largest-first',
+      fallbackStrategy = 'largest-first',
+      maxInputs,
+      minUtxoAmount = 0
+    } = options
+
+    // Filter by minimum amount
+    const eligible = utxos.filter(u => u.token.amount >= minUtxoAmount)
+    const excluded = utxos.filter(u => u.token.amount < minUtxoAmount)
+
+    // Sort based on strategy
+    let sorted: T[]
+    switch (strategy) {
+      case 'smallest-first':
+        sorted = [...eligible].sort((a, b) => a.token.amount - b.token.amount)
+        break
+      case 'random':
+        sorted = [...eligible].sort(() => Math.random() - 0.5)
+        break
+      case 'exact-match':
+        // Try to find exact match first
+        const exactMatch = eligible.find(u => u.token.amount === amount)
+        if (exactMatch) {
+          return { selected: [exactMatch], totalInput: amount, excluded }
+        }
+        // Fall back to configured strategy
+        switch (fallbackStrategy) {
+          case 'smallest-first':
+            sorted = [...eligible].sort((a, b) => a.token.amount - b.token.amount)
+            break
+          case 'random':
+            sorted = [...eligible].sort(() => Math.random() - 0.5)
+            break
+          case 'largest-first':
+          default:
+            sorted = [...eligible].sort((a, b) => b.token.amount - a.token.amount)
+            break
+        }
+        break
+      case 'largest-first':
+      default:
+        sorted = [...eligible].sort((a, b) => b.token.amount - a.token.amount)
+        break
+    }
+
+    // Select UTXOs until we meet the target
     const selected: T[] = []
     let totalInput = 0
 
     for (const utxo of sorted) {
       if (totalInput >= amount) break
+      if (maxInputs !== undefined && selected.length >= maxInputs) break
       selected.push(utxo)
       totalInput += utxo.token.amount
     }
 
-    return { selected, totalInput }
+    return { selected, totalInput, excluded }
   }
 
   // ---------------------------------------------------------------------------

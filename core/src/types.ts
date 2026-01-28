@@ -108,6 +108,46 @@ export interface BTMSAssetMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// UTXO Selection Types
+// ---------------------------------------------------------------------------
+
+/**
+ * UTXO selection strategy for spending tokens.
+ * Different strategies optimize for different goals.
+ */
+export type SelectionStrategy =
+  | 'largest-first'   // Greedy: use largest UTXOs first (minimizes UTXO count)
+  | 'smallest-first'  // Use smallest UTXOs first (preserves large UTXOs for big payments)
+  | 'exact-match'     // Try to find exact match first, then fall back to largest-first
+  | 'random'          // Random selection (privacy-preserving)
+
+/**
+ * Options for UTXO selection
+ */
+export interface SelectionOptions {
+  /** Selection strategy to use (default: 'largest-first') */
+  strategy?: SelectionStrategy
+  /** Fallback strategy when exact-match fails (default: 'largest-first') */
+  fallbackStrategy?: Exclude<SelectionStrategy, 'exact-match'>
+  /** Maximum number of UTXOs to select (default: unlimited) */
+  maxInputs?: number
+  /** Minimum UTXO amount to consider (default: 0) */
+  minUtxoAmount?: number
+}
+
+/**
+ * Result of UTXO selection
+ */
+export interface SelectionResult<T> {
+  /** Selected UTXOs */
+  selected: T[]
+  /** Total input amount from selected UTXOs */
+  totalInput: number
+  /** UTXOs that were excluded (not found on overlay, etc.) */
+  excluded: T[]
+}
+
+// ---------------------------------------------------------------------------
 // Token Output Types
 // ---------------------------------------------------------------------------
 
@@ -125,6 +165,8 @@ export interface BTMSTokenOutput {
   satoshis: SatoshiValue
   /** Locking script hex */
   lockingScript: HexString
+  /** Custom instructions containing derivation keys */
+  customInstructions?: string
   /** Decoded token data */
   token: DecodedBTMSToken
   /** Whether this output is spendable */
@@ -149,8 +191,8 @@ export interface TokenForRecipient {
   satoshis: SatoshiValue
   /** Full BEEF for SPV verification */
   beef: AtomicBEEF
-  /** Key derivation info for recipient */
-  keyID: string
+  /** Custom instructions containing derivation keys */
+  customInstructions: string
   /** Asset ID */
   assetId: string
   /** Metadata JSON */
@@ -158,31 +200,14 @@ export interface TokenForRecipient {
 }
 
 /**
- * Incoming token payment from another user
+ * Incoming token from another user.
+ * Extends TokenForRecipient with messaging metadata.
  */
-export interface IncomingPayment {
-  /** Transaction ID */
-  txid: TXIDHexString
-  /** Output index */
-  outputIndex: number
-  /** Locking script hex */
-  lockingScript: HexString
-  /** Token amount */
-  amount: number
-  /** Asset ID */
-  assetId: string
-  /** Sender's identity key */
+export interface IncomingToken extends TokenForRecipient {
+  /** Sender's identity key (added by messaging layer) */
   sender: PubKeyHex
-  /** Message ID for acknowledgment */
+  /** Message ID for acknowledgment (added by messaging layer) */
   messageId: string
-  /** Satoshi value */
-  satoshis: SatoshiValue
-  /** Full BEEF for verification */
-  beef: AtomicBEEF
-  /** Key ID for unlocking */
-  keyID: string
-  /** Metadata JSON */
-  metadata?: string
 }
 
 // ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import {
   WalletCounterparty
 } from '@bsv/sdk'
 
-import type { BTMSTokenFields, BTMSTokenDecodeResult, DecodedBTMSToken } from './types.js'
+import type { BTMSTokenDecodeResult, DecodedBTMSToken } from './types.js'
 import { BTMS_PROTOCOL_ID, BTMS_KEY_ID, ISSUE_MARKER, MIN_TOKEN_AMOUNT, MAX_TOKEN_AMOUNT } from './constants.js'
 
 /**
@@ -48,15 +48,18 @@ export class BTMSToken {
   private wallet: WalletInterface
   private protocolID: WalletProtocol
   private keyID: string
+  private originator?: string
 
   constructor(
     wallet?: WalletInterface,
     protocolID: WalletProtocol = BTMS_PROTOCOL_ID,
-    keyID: string = BTMS_KEY_ID
+    keyID: string = BTMS_KEY_ID,
+    originator?: string
   ) {
     this.wallet = wallet ?? new WalletClient()
     this.protocolID = protocolID
     this.keyID = keyID
+    this.originator = originator
   }
 
   /**
@@ -66,24 +69,26 @@ export class BTMSToken {
    * becomes `{txid}.{outputIndex}` after the transaction is mined.
    * 
    * @param amount - Number of tokens to issue (positive integer)
+   * @param keyID - Key ID for derivation
    * @param metadata - Optional metadata object (will be JSON stringified)
    * @param counterparty - Who can spend this token (default: 'self')
    * @returns The locking script for the issuance output
    */
   async createIssuance(
     amount: number,
+    keyID: string,
     metadata?: Record<string, unknown>,
     counterparty: WalletCounterparty = 'self'
   ): Promise<LockingScript> {
     this.validateAmount(amount)
 
     const fields = this.buildFields(ISSUE_MARKER, amount, metadata)
-    const pushdrop = new PushDrop(this.wallet)
+    const pushdrop = new PushDrop(this.wallet, this.originator)
 
     return pushdrop.lock(
       fields,
       this.protocolID,
-      this.keyID,
+      keyID,
       counterparty,
       counterparty === 'self'
     )
@@ -100,25 +105,27 @@ export class BTMSToken {
    * @param amount - Number of tokens to transfer (positive integer)
    * @param metadata - Metadata (must match original issuance)
    * @param counterparty - Recipient's identity key or 'self'
+   * @param keyID - key ID for derivation
    * @returns The locking script for the transfer output
    */
   async createTransfer(
     assetId: string,
     amount: number,
-    metadata?: string,
-    counterparty: WalletCounterparty = 'self'
+    keyID: string,
+    counterparty: WalletCounterparty = 'self',
+    metadata?: string
   ): Promise<LockingScript> {
     this.validateAmount(amount)
     this.validateAssetId(assetId)
 
     // For transfers, metadata is passed as-is (already stringified from original)
     const fields = this.buildFieldsRaw(assetId, amount, metadata)
-    const pushdrop = new PushDrop(this.wallet)
+    const pushdrop = new PushDrop(this.wallet, this.originator)
 
     return pushdrop.lock(
       fields,
       this.protocolID,
-      this.keyID,
+      keyID,
       counterparty,
       counterparty === 'self'
     )
@@ -128,12 +135,13 @@ export class BTMSToken {
    * Create an unlocking script template for spending a BTMS token.
    * 
    * @param counterparty - The counterparty used when the token was created
+   * @param keyID - Optional key ID for derivation (defaults to instance keyID)
    * @returns An unlocker that can sign transactions
    */
-  createUnlocker(counterparty: WalletCounterparty = 'self') {
-    return new PushDrop(this.wallet).unlock(
+  createUnlocker(counterparty: WalletCounterparty = 'self', keyID?: string) {
+    return new PushDrop(this.wallet, this.originator).unlock(
       this.protocolID,
-      this.keyID,
+      keyID ?? this.keyID,
       counterparty
     )
   }
@@ -155,18 +163,18 @@ export class BTMSToken {
       const decoded = PushDrop.decode(script)
       const fields = decoded.fields
 
-      // BTMS tokens have 2-3 fields
-      if (fields.length < 2 || fields.length > 3) {
+      // BTMS tokens have 3-4 fields (2-3 data fields + signature)
+      if (fields.length < 3 || fields.length > 4) {
         return {
           valid: false,
-          error: `Invalid field count: expected 2-3, got ${fields.length}`
+          error: `Invalid field count: expected 3-4, got ${fields.length}`
         }
       }
 
-      // Decode fields
+      // Decode fields (signature is last field, so metadata is at index 2 if present)
       const assetId = Utils.toUTF8(fields[0])
       const amountStr = Utils.toUTF8(fields[1])
-      const metadata = fields[2] ? Utils.toUTF8(fields[2]) : undefined
+      const metadata = fields.length === 4 ? Utils.toUTF8(fields[2]) : undefined
 
       // Validate amount
       const amount = Number(amountStr)

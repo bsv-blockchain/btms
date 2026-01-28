@@ -57,7 +57,12 @@ export type {
   // Token output types
   BTMSTokenOutput,
   TokenForRecipient,
-  IncomingPayment,
+  IncomingToken,
+
+  // UTXO selection types
+  SelectionStrategy,
+  SelectionOptions,
+  SelectionResult,
 
   // Operation result types
   IssueResult,
