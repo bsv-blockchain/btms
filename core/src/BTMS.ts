@@ -48,7 +48,12 @@ import type {
   ProveOwnershipResult,
   VerifyOwnershipResult,
   SelectionOptions,
-  SelectionResult
+  SelectionResult,
+  ChangeStrategy,
+  ChangeStrategyType,
+  ChangeStrategyOptions,
+  ChangeContext,
+  ChangeOutput
 } from './types.js'
 import {
   BTMS_TOPIC,
@@ -249,9 +254,15 @@ export class BTMS {
    * @param assetId - The asset to send
    * @param recipient - Recipient's identity public key
    * @param amount - Amount to send
+   * @param options - Optional send options including change strategy
    * @returns Send result with transaction details
    */
-  async send(assetId: string, recipient: PubKeyHex, amount: number): Promise<SendResult> {
+  async send(
+    assetId: string,
+    recipient: PubKeyHex,
+    amount: number,
+    options: { changeStrategy?: ChangeStrategyOptions } = {}
+  ): Promise<SendResult> {
     try {
       // Validate inputs
       if (!BTMSToken.isValidAssetId(assetId)) {
@@ -315,32 +326,43 @@ export class BTMS {
         ...(isSendingToSelf ? { basket } : {})
       })
 
-      // Change output (if needed)
+      // Change outputs (if needed)
       const changeAmount = totalInput - amount
       if (changeAmount > 0) {
-        // Generate random derivation for change output
-        const changeDerivationSuffix = Utils.toBase64(Random(32))
-        const changeKeyID = `${paymentDerivationPrefix} ${changeDerivationSuffix}`
-
-        const changeScript = await this.tokenTemplate.createTransfer(
-          assetId,
+        // Compute change outputs using the specified strategy
+        const changeContext: ChangeContext = {
           changeAmount,
-          changeKeyID,
-          'self',
-          metadata
-        )
+          paymentAmount: amount,
+          totalInput,
+          assetId
+        }
+        const changeOutputs = BTMS.computeChangeOutputs(changeContext, options.changeStrategy)
 
-        outputs.push({
-          satoshis: this.config.tokenSatoshis,
-          lockingScript: changeScript.toHex(),
-          customInstructions: JSON.stringify({
-            derivationPrefix: paymentDerivationPrefix,
-            derivationSuffix: changeDerivationSuffix
-          }),
-          basket,
-          outputDescription: `Change: ${changeAmount} tokens`,
-          tags: ['btms_change'] as OutputTagStringUnder300Bytes[]
-        })
+        // Create each change output
+        for (const changeOutput of changeOutputs) {
+          const changeDerivationSuffix = Utils.toBase64(Random(32))
+          const changeKeyID = `${paymentDerivationPrefix} ${changeDerivationSuffix}`
+
+          const changeScript = await this.tokenTemplate.createTransfer(
+            assetId,
+            changeOutput.amount,
+            changeKeyID,
+            'self',
+            metadata
+          )
+
+          outputs.push({
+            satoshis: this.config.tokenSatoshis,
+            lockingScript: changeScript.toHex(),
+            customInstructions: JSON.stringify({
+              derivationPrefix: paymentDerivationPrefix,
+              derivationSuffix: changeDerivationSuffix
+            }),
+            basket,
+            outputDescription: `Change: ${changeOutput.amount} tokens`,
+            tags: ['btms_change'] as OutputTagStringUnder300Bytes[]
+          })
+        }
       }
 
       // Build inputs
@@ -1145,6 +1167,128 @@ export class BTMS {
     }
 
     return { selected, totalInput, excluded }
+  }
+
+  /**
+   * Compute change outputs using the specified strategy.
+   * 
+   * @param context - Change context with amounts and asset info
+   * @param options - Change strategy options
+   * @returns Array of change outputs to create
+   */
+  static computeChangeOutputs(
+    context: ChangeContext,
+    options: ChangeStrategyOptions = {}
+  ): ChangeOutput[] {
+    const { changeAmount } = context
+
+    if (changeAmount <= 0) {
+      return []
+    }
+
+    const {
+      strategy = 'single',
+      splitCount = 2,
+      minOutputAmount = 1
+    } = options
+
+    // If a custom strategy object is provided, use it
+    if (typeof strategy === 'object' && 'computeChange' in strategy) {
+      return strategy.computeChange(context)
+    }
+
+    // Built-in strategies
+    switch (strategy) {
+      case 'split-equal':
+        return BTMS.splitEqualChange(changeAmount, splitCount, minOutputAmount)
+
+      case 'split-random':
+        return BTMS.splitRandomChange(changeAmount, splitCount, minOutputAmount)
+
+      case 'single':
+      default:
+        return [{ amount: changeAmount }]
+    }
+  }
+
+  /**
+   * Split change into equal amounts.
+   */
+  private static splitEqualChange(
+    changeAmount: number,
+    splitCount: number,
+    minOutputAmount: number
+  ): ChangeOutput[] {
+    // Ensure we can create at least minOutputAmount per output
+    const maxOutputs = Math.floor(changeAmount / minOutputAmount)
+    const actualCount = Math.min(splitCount, maxOutputs)
+
+    if (actualCount <= 1) {
+      return [{ amount: changeAmount }]
+    }
+
+    const perOutput = Math.floor(changeAmount / actualCount)
+    const remainder = changeAmount - (perOutput * actualCount)
+
+    const outputs: ChangeOutput[] = []
+    for (let i = 0; i < actualCount; i++) {
+      // Add remainder to the last output
+      const amount = i === actualCount - 1 ? perOutput + remainder : perOutput
+      outputs.push({ amount })
+    }
+
+    return outputs
+  }
+
+  /**
+   * Split change into random amounts using a logarithmic distribution.
+   * Uses a Benford-inspired formula to favor smaller amounts, creating
+   * more natural-looking output amounts for privacy.
+   */
+  private static splitRandomChange(
+    changeAmount: number,
+    splitCount: number,
+    minOutputAmount: number
+  ): ChangeOutput[] {
+    // Ensure we can create at least minOutputAmount per output
+    const maxOutputs = Math.floor(changeAmount / minOutputAmount)
+    const actualCount = Math.min(splitCount, maxOutputs)
+
+    if (actualCount <= 1) {
+      return [{ amount: changeAmount }]
+    }
+
+    const outputs: ChangeOutput[] = []
+    let remaining = changeAmount - (actualCount * minOutputAmount) // Reserve minimum for each
+
+    // Distribute using Benford-like distribution
+    for (let i = 0; i < actualCount - 1; i++) {
+      const portion = BTMS.benfordNumber(0, remaining)
+      outputs.push({ amount: minOutputAmount + portion })
+      remaining -= portion
+    }
+
+    // Last output gets the remainder
+    outputs.push({ amount: minOutputAmount + remaining })
+
+    // Shuffle to avoid predictable ordering
+    for (let i = outputs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+        ;[outputs[i], outputs[j]] = [outputs[j], outputs[i]]
+    }
+
+    return outputs
+  }
+
+  /**
+   * Generate a logarithmically-distributed random number.
+   * Uses a formula inspired by Benford's law to favor smaller values,
+   * creating more natural-looking distributions.
+   */
+  private static benfordNumber(min: number, max: number): number {
+    if (max <= min) return min
+    const d = Math.floor(Math.random() * 9) + 1
+    return Math.floor(min + ((max - min) * Math.log10(1 + 1 / d)) / Math.log10(10))
   }
 
   // ---------------------------------------------------------------------------

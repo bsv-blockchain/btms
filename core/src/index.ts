@@ -64,6 +64,13 @@ export type {
   SelectionOptions,
   SelectionResult,
 
+  // Change strategy types
+  ChangeOutput,
+  ChangeContext,
+  ChangeStrategy,
+  ChangeStrategyType,
+  ChangeStrategyOptions,
+
   // Operation result types
   IssueResult,
   SendResult,

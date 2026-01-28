@@ -148,6 +148,67 @@ export interface SelectionResult<T> {
 }
 
 // ---------------------------------------------------------------------------
+// Change Strategy Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents a single change output to be created
+ */
+export interface ChangeOutput {
+  /** Token amount for this change output */
+  amount: number
+}
+
+/**
+ * Context provided to change strategies for computing change outputs
+ */
+export interface ChangeContext {
+  /** Total change amount to distribute */
+  changeAmount: number
+  /** Original payment amount being sent */
+  paymentAmount: number
+  /** Total input amount from selected UTXOs */
+  totalInput: number
+  /** Asset ID being transferred */
+  assetId: string
+}
+
+/**
+ * Interface for custom change generation strategies.
+ * Implementations determine how change is split across outputs.
+ */
+export interface ChangeStrategy {
+  /**
+   * Compute the change outputs for a transaction.
+   * The sum of all returned output amounts must equal changeAmount.
+   * 
+   * @param context - Context about the transaction
+   * @returns Array of change outputs to create
+   */
+  computeChange(context: ChangeContext): ChangeOutput[]
+}
+
+/**
+ * Built-in change strategy types
+ */
+export type ChangeStrategyType =
+  | 'single'       // Single change output (default)
+  | 'split-equal'  // Split into equal amounts
+  | 'split-random' // Split into random amounts (Benford distribution)
+
+/**
+ * Options for built-in change strategies
+ */
+export interface ChangeStrategyOptions {
+  /** Strategy type or custom strategy implementation */
+  strategy?: ChangeStrategyType | ChangeStrategy
+  /** Number of outputs for split strategies (default: 2) */
+  splitCount?: number
+  /** Minimum amount per output for split strategies (default: 1) */
+  minOutputAmount?: number
+}
+
+// ---------------------------------------------------------------------------
 // Token Output Types
 // ---------------------------------------------------------------------------
 
