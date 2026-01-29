@@ -120,4 +120,5 @@ export {
 } from './constants.js'
 
 // Utilities
-export { extractKeyIDFromCustomInstructions } from './utils.js'
+export { parseCustomInstructions } from './utils.js'
+export type { ParsedCustomInstructions } from './utils.js'

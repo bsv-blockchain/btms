@@ -123,8 +123,7 @@ export class BTMSToken {
       fields,
       this.protocolID,
       keyID,
-      counterparty,
-      counterparty === 'self'
+      counterparty
     )
   }
 

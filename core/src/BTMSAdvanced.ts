@@ -1,6 +1,6 @@
 import { BTMS } from './BTMS.js'
 import { BTMSToken } from './BTMSToken.js'
-import { extractKeyIDFromCustomInstructions } from './utils.js'
+import { parseCustomInstructions } from './utils.js'
 import {
   BTMS_TOPIC,
   BTMS_LABEL,
@@ -229,8 +229,9 @@ export class BTMSAdvanced extends BTMS {
 
         for (let i = 0; i < remainingUtxos.length; i++) {
           const utxo = remainingUtxos[i]
-          const keyID = extractKeyIDFromCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
-          const unlocker = this['tokenTemplate'].createUnlocker('self', keyID)
+          const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+          const counterparty = senderIdentityKey ?? 'self'
+          const unlocker = this['tokenTemplate'].createUnlocker(counterparty, keyID)
           const unlockingScript = await unlocker.sign(txForSigning, i)
           spends[i] = { unlockingScript: unlockingScript.toHex() }
         }

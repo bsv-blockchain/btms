@@ -33,7 +33,7 @@ import {
 } from '@bsv/sdk'
 
 import { BTMSToken } from './BTMSToken.js'
-import { extractKeyIDFromCustomInstructions } from './utils.js'
+import { parseCustomInstructions } from './utils.js'
 import type {
   BTMSConfig,
   ResolvedBTMSConfig,
@@ -299,9 +299,6 @@ export class BTMS {
         }
       }
 
-      // Determine if sending to self
-      const isSendingToSelf = senderKey === recipient
-
       // Build outputs
       const outputs: CreateActionOutput[] = []
       const basket = getAssetBasket(assetId)
@@ -316,7 +313,7 @@ export class BTMS {
         assetId,
         amount,
         recipientKeyID,
-        isSendingToSelf ? 'self' : recipient,
+        recipient,
         metadata
       )
       const recipientScriptHex = recipientScript.toHex() as HexString
@@ -329,8 +326,7 @@ export class BTMS {
           derivationSuffix: recipientDerivationSuffix
         }),
         outputDescription: `Send ${amount} tokens`,
-        tags: ['btms_transfer'] as OutputTagStringUnder300Bytes[],
-        ...(isSendingToSelf ? { basket } : {})
+        tags: ['btms_transfer'] as OutputTagStringUnder300Bytes[]
       })
 
       // Change outputs (if needed)
@@ -398,14 +394,15 @@ export class BTMS {
         throw new Error('Failed to create signable transaction')
       }
 
-      // Sign all inputs with their respective keyIDs
+      // Sign all inputs with their respective keyIDs and counterparties
       const txForSigning = Transaction.fromAtomicBEEF(signableTransaction.tx)
-      debugger
       const spends: Record<number, { unlockingScript: string }> = {}
       for (let i = 0; i < selected.length; i++) {
         const utxo = selected[i]
-        const keyID = extractKeyIDFromCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
-        const unlocker = this.tokenTemplate.createUnlocker('self', keyID)
+        const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+        // Use senderIdentityKey as counterparty if present (received tokens), otherwise 'self' (issued tokens)
+        const counterparty = senderIdentityKey ?? 'self'
+        const unlocker = this.tokenTemplate.createUnlocker(counterparty, keyID)
         const unlockingScript = await unlocker.sign(txForSigning, i)
         spends[i] = { unlockingScript: unlockingScript.toHex() }
       }
@@ -450,7 +447,7 @@ export class BTMS {
       }
 
       // Send to recipient via comms layer (if configured and not sending to self)
-      if (this.config.comms && !isSendingToSelf) {
+      if (this.config.comms) {
         await this.config.comms.sendMessage({
           recipient,
           messageBox: this.config.messageBox,
@@ -545,11 +542,38 @@ export class BTMS {
       }
 
       // We must verify we can unlock this token in the future!
+      // Parse customInstructions to get key derivation parameters
+      const { keyID } = parseCustomInstructions(
+        token.customInstructions,
+        token.txid,
+        token.outputIndex
+      )
 
+      // Derive the public key we would use to unlock this token
+      const { publicKey: derivedPubKey } = await this.config.wallet.getPublicKey({
+        protocolID: BTMS_PROTOCOL_ID,
+        keyID,
+        counterparty: token.sender,
+        forSelf: true
+      }, this.originator)
+
+      // Compare with the locking public key embedded in the script
+      if (decoded.lockingPublicKey !== derivedPubKey) {
+        throw new Error(
+          `Key derivation mismatch: expected ${decoded.lockingPublicKey}, derived ${derivedPubKey}. ` +
+          `Cannot unlock this token with the provided customInstructions.`
+        )
+      }
 
       // Internalize the token into the wallet
+      // Augment customInstructions with senderIdentityKey so we can unlock later
+      const originalInstructions = JSON.parse(token.customInstructions)
+      const augmentedInstructions = JSON.stringify({
+        ...originalInstructions,
+        senderIdentityKey: token.sender
+      })
+
       const basket = getAssetBasket(token.assetId)
-      debugger
       await this.config.wallet.internalizeAction({
         tx: token.beef,
         labels: [BTMS_LABEL],
@@ -559,7 +583,7 @@ export class BTMS {
             protocol: 'basket insertion',
             insertionRemittance: {
               basket,
-              customInstructions: token.customInstructions,
+              customInstructions: augmentedInstructions,
               tags: ['btms_received'] as OutputTagStringUnder300Bytes[]
             }
           }
@@ -831,7 +855,8 @@ export class BTMS {
       const provenTokens: ProvenToken[] = []
 
       for (const utxo of selected) {
-        const keyID = extractKeyIDFromCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+        const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+        const counterparty = senderIdentityKey ?? 'self'
 
         // Reveal specific key linkage for this token
         // The counterparty is 'self' for tokens we own (resolved to our own key)
