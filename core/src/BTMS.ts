@@ -314,7 +314,8 @@ export class BTMS {
         amount,
         recipientKeyID,
         recipient,
-        metadata
+        metadata,
+        false
       )
       const recipientScriptHex = recipientScript.toHex() as HexString
 
@@ -374,7 +375,7 @@ export class BTMS {
         unlockingScriptLength: 74,
         inputDescription: `Spend ${u.token.amount} tokens`
       }))
-
+      console.log(inputBeef.toHex())
       // Create the action with BEEF from overlay
       const createArgs: CreateActionArgs = {
         description: `Send ${amount} tokens to ${recipient.slice(0, 8)}...`,

@@ -87,7 +87,7 @@ export class BTMSToken {
       this.protocolID,
       keyID,
       counterparty,
-      counterparty === 'self'
+      false
     )
   }
 
@@ -103,6 +103,7 @@ export class BTMSToken {
    * @param metadata - Metadata (must match original issuance)
    * @param counterparty - Recipient's identity key or 'self'
    * @param keyID - key ID for derivation
+   * @param includeSignature - Whether to include PushDrop signature (default false, since signAction handles signing)
    * @returns The locking script for the transfer output
    */
   async createTransfer(
@@ -110,7 +111,8 @@ export class BTMSToken {
     amount: number,
     keyID: string,
     counterparty: WalletCounterparty = 'self',
-    metadata?: string
+    metadata?: string,
+    includeSignature = false
   ): Promise<LockingScript> {
     this.validateAmount(amount)
     this.validateAssetId(assetId)
@@ -123,7 +125,9 @@ export class BTMSToken {
       fields,
       this.protocolID,
       keyID,
-      counterparty
+      counterparty,
+      false,
+      includeSignature
     )
   }
 

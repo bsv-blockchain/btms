@@ -78,7 +78,14 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       setOpen(false)
     } catch (err: any) {
       console.error(err)
-      toast.error(err?.message || 'Something went wrong!')
+      const message = err?.message || ''
+      if (message.includes('Permission denied')) {
+        toast('Permission request cancelled', {
+          autoClose: 4000,
+        })
+        return
+      }
+      toast.error(message || 'Something went wrong!')
     } finally {
       setLoading(false)
     }
