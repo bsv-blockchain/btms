@@ -1241,11 +1241,15 @@ describe('Ownership Proof', () => {
         valid: true,
         assetId: `${MOCK_TXID}.0`,
         amount: 100,
-        metadata: undefined
+        metadata: undefined,
+        lockingPublicKey: MOCK_IDENTITY_KEY
       })
 
       try {
         const result = await btms.accept(incomingToken)
+        if (!result.success) {
+          console.log('Accept failed with error:', result.error)
+        }
         expect(result.success).toBe(true)
         expect(result.assetId).toBe(`${MOCK_TXID}.0`)
         expect(result.amount).toBe(100)
@@ -1281,7 +1285,8 @@ describe('Ownership Proof', () => {
         valid: true,
         assetId: `${MOCK_TXID}.0`,
         amount: 100,
-        metadata: undefined
+        metadata: undefined,
+        lockingPublicKey: MOCK_IDENTITY_KEY
       })
 
       try {
@@ -1331,7 +1336,8 @@ describe('Ownership Proof', () => {
         valid: true,
         assetId: `${MOCK_TXID}.0`,
         amount: 100,
-        metadata: undefined
+        metadata: undefined,
+        lockingPublicKey: MOCK_IDENTITY_KEY
       })
 
       try {

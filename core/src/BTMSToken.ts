@@ -163,18 +163,29 @@ export class BTMSToken {
       const decoded = PushDrop.decode(script)
       const fields = decoded.fields
 
-      // BTMS tokens have 3-4 fields (2-3 data fields + signature)
-      if (fields.length < 3 || fields.length > 4) {
+      // BTMS tokens have 2-4 fields:
+      // - Without signature: 2 fields (assetId, amount) or 3 fields (assetId, amount, metadata)
+      // - With signature: 3 fields (assetId, amount, signature) or 4 fields (assetId, amount, metadata, signature)
+      if (fields.length < 2 || fields.length > 4) {
         return {
           valid: false,
-          error: `Invalid field count: expected 3-4, got ${fields.length}`
+          error: `Invalid field count: expected 2-4, got ${fields.length}`
         }
       }
 
-      // Decode fields (signature is last field, so metadata is at index 2 if present)
+      // Decode fields
       const assetId = Utils.toUTF8(fields[0])
       const amountStr = Utils.toUTF8(fields[1])
-      const metadata = fields.length === 4 ? Utils.toUTF8(fields[2]) : undefined
+
+      // Try to get metadata from field 2 if it looks like JSON
+      let metadata: string | undefined
+      if (fields.length >= 3) {
+        const potentialMetadata = Utils.toUTF8(fields[2])
+        // Only treat as metadata if it starts with { (JSON object)
+        if (potentialMetadata.startsWith('{')) {
+          metadata = potentialMetadata
+        }
+      }
 
       // Validate amount
       const amount = Number(amountStr)
