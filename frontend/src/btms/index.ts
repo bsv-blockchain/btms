@@ -5,7 +5,7 @@
 // This module wraps @bsv/btms-core to provide a simple interface for the UI.
 // It handles initialization, asset change notifications, and MessageBoxClient integration.
 
-import { BTMS as BTMSCore, BTMSAsset, IncomingPayment as CoreIncomingPayment, CommsLayer } from '@bsv/btms-core'
+import { BTMS as BTMSCore, BTMSAsset, IncomingToken as CoreIncomingPayment, CommsLayer, IncomingToken } from '@bsv/btms-core'
 import { WalletClient, PubKeyHex } from '@bsv/sdk'
 import { MessageBoxClient } from '@bsv/message-box-client'
 
@@ -21,18 +21,6 @@ export interface Asset {
   hasPendingIncoming?: boolean
   incoming?: boolean
   incomingAmount?: number
-}
-
-// Incoming payment type for UI
-export interface IncomingPayment {
-  txid: string
-  outputIndex: number
-  lockingScript: string
-  amount: number
-  assetId: string
-  sender: string
-  messageId: string
-  beef?: number[]
 }
 
 // Asset change callback type
@@ -198,7 +186,7 @@ class BTMSFrontend {
    * 
    * @param assetId - Optional filter by asset ID
    */
-  async listIncomingPayments(assetId?: string): Promise<IncomingPayment[]> {
+  async listIncomingPayments(assetId?: string): Promise<IncomingToken[]> {
     const incoming = await this.core.listIncoming(assetId)
     return incoming.map(p => ({
       txid: p.txid,
@@ -207,7 +195,9 @@ class BTMSFrontend {
       amount: p.amount,
       assetId: p.assetId,
       sender: p.sender,
+      satoshis: p.satoshis,
       messageId: p.messageId,
+      customInstructions: p.customInstructions,
       beef: p.beef as number[] | undefined
     }))
   }
@@ -220,18 +210,18 @@ class BTMSFrontend {
    */
   async acceptIncomingPayment(
     _assetId: string,
-    payment: IncomingPayment
+    payment: IncomingToken
   ): Promise<boolean> {
     const result = await this.core.accept({
       txid: payment.txid as any,
       outputIndex: payment.outputIndex,
       lockingScript: payment.lockingScript as any,
       amount: payment.amount,
-      satoshis: 1, // Default satoshi value for BTMS tokens
+      satoshis: payment.satoshis,
       assetId: payment.assetId,
       sender: payment.sender as any,
       messageId: payment.messageId,
-      keyID: '1', // Default key ID
+      customInstructions: payment.customInstructions as any,
       beef: payment.beef as any
     })
 
@@ -281,7 +271,7 @@ class BTMSFrontend {
    */
   async refundIncomingTransaction(
     _assetId: string,
-    _payment: IncomingPayment
+    _payment: IncomingToken
   ): Promise<{ success: boolean }> {
     // Refund would require creating a new transaction sending tokens back to sender
     // For now, just acknowledge the message to remove it from inbox

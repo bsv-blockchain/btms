@@ -32,9 +32,9 @@ export const DEFAULT_TOKEN_SATOSHIS = 1 as SatoshiValue
  * 
  * Format: [securityLevel, protocolName]
  * - Security level 0: No special security requirements
- * - Protocol name "btms tokens": Basic Token Management System
+ * - Protocol name "p btms": Matches the basket prefix for consistency
  */
-export const BTMS_PROTOCOL_ID: WalletProtocol = [0, 'btms tokens']
+export const BTMS_PROTOCOL_ID: WalletProtocol = [0, 'p btms']
 
 /** Default key ID for BTMS operations */
 export const BTMS_KEY_ID = '1'

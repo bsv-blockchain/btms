@@ -67,8 +67,6 @@ import {
   getAssetBasket
 } from './constants.js'
 
-const BTMS_PROTOCOL: WalletProtocol = [0, 'p btms']
-
 /**
  * BTMS - Basic Token Management System
  * 
@@ -102,7 +100,7 @@ export class BTMS {
     this.config = this.resolveConfig(config)
     this.tokenTemplate = new BTMSToken(
       this.config.wallet,
-      BTMS_PROTOCOL,
+      BTMS_PROTOCOL_ID,
       this.originator
     )
   }
@@ -116,7 +114,7 @@ export class BTMS {
     // Recreate token template with new originator
     this.tokenTemplate = new BTMSToken(
       this.config.wallet,
-      BTMS_PROTOCOL,
+      BTMS_PROTOCOL_ID,
       this.originator
     )
   }
@@ -274,7 +272,7 @@ export class BTMS {
 
       // Get sender identity
       const senderKey = await this.getIdentityKey()
-
+      debugger
       // Fetch spendable UTXOs for this asset
       const { tokens: utxos } = await this.getSpendableTokens(assetId)
 
@@ -291,6 +289,15 @@ export class BTMS {
 
       // Get metadata from first selected UTXO (must be consistent)
       const metadata = selected[0].token.metadata
+
+      // Ensure metadata is consistent across all selected UTXOs
+      const metadataJson = JSON.stringify(metadata ?? null)
+      for (const utxo of selected) {
+        const utxoMetadataJson = JSON.stringify(utxo.token.metadata ?? null)
+        if (utxoMetadataJson !== metadataJson) {
+          throw new Error('Metadata mismatch across selected tokens')
+        }
+      }
 
       // Determine if sending to self
       const isSendingToSelf = senderKey === recipient
@@ -393,7 +400,7 @@ export class BTMS {
 
       // Sign all inputs with their respective keyIDs
       const txForSigning = Transaction.fromAtomicBEEF(signableTransaction.tx)
-
+      debugger
       const spends: Record<number, { unlockingScript: string }> = {}
       for (let i = 0; i < selected.length; i++) {
         const utxo = selected[i]
@@ -537,9 +544,12 @@ export class BTMS {
         }
       }
 
+      // We must verify we can unlock this token in the future!
+
+
       // Internalize the token into the wallet
       const basket = getAssetBasket(token.assetId)
-
+      debugger
       await this.config.wallet.internalizeAction({
         tx: token.beef,
         labels: [BTMS_LABEL],
@@ -610,7 +620,6 @@ export class BTMS {
         includeOutputs: true,
         limit: 10000
       }, this.originator)
-      debugger
 
       const basketPrefix = BTMS_BASKET_PREFIX + ' '
       for (const action of actionsResult.actions) {
@@ -720,7 +729,23 @@ export class BTMS {
       if (!output.spendable) continue
       if (output.satoshis !== this.config.tokenSatoshis) continue
 
-      const scriptHex = (output as any).lockingScript
+      const [txid, outputIndexStr] = output.outpoint.split('.')
+      const outputIndex = Number(outputIndexStr)
+
+      let scriptHex: LockingScript | HexString | undefined
+      if (includeBeef) {
+        // When includeBeef is true, lockingScript is not returned - get it from the transaction
+        if (!result.BEEF) {
+          console.log('[BTMS] no BEEF data')
+          continue
+        }
+        const tx = Transaction.fromBEEF(result.BEEF, txid)
+        scriptHex = tx.outputs[Number(outputIndexStr)].lockingScript
+      } else {
+        // When includeBeef is false, use the returned lockingScript
+        scriptHex = output.lockingScript
+      }
+
       if (!scriptHex) {
         console.log('[BTMS] no lockingScript')
         continue
@@ -733,9 +758,6 @@ export class BTMS {
       // For transfer outputs, verify the assetId matches
       if (decoded.assetId !== ISSUE_MARKER && decoded.assetId !== assetId) continue
 
-      const [txid, outputIndexStr] = output.outpoint.split('.')
-      const outputIndex = Number(outputIndexStr)
-
       tokens.push({
         outpoint: output.outpoint,
         txid: txid as TXIDHexString,
@@ -744,10 +766,13 @@ export class BTMS {
         lockingScript: scriptHex as HexString,
         customInstructions: output.customInstructions,
         token: decoded,
-        spendable: true
+        spendable: true,
+        // Per-output beef comes from result.BEEF (shared across all outputs)
+        beef: includeBeef && result.BEEF ? result.BEEF : undefined
       })
     }
 
+    // Also return the merged BEEF for convenience
     const beef = includeBeef && result.BEEF ? Beef.fromBinary(Utils.toArray(result.BEEF)) : undefined
     return { tokens, beef }
   }
@@ -813,7 +838,7 @@ export class BTMS {
         const linkageResult = await this.config.wallet.revealSpecificKeyLinkage({
           counterparty: prover, // Self-owned tokens use our own key as counterparty
           verifier,
-          protocolID: BTMS_PROTOCOL,
+          protocolID: BTMS_PROTOCOL_ID,
           keyID
         }, this.originator)
 
@@ -915,9 +940,9 @@ export class BTMS {
           ciphertext: provenToken.linkage.encryptedLinkage,
           protocolID: [
             2,
-            `specific linkage revelation ${BTMS_PROTOCOL[0]} ${BTMS_PROTOCOL[1]}`
+            `specific linkage revelation ${BTMS_PROTOCOL_ID[0]} ${BTMS_PROTOCOL_ID[1]}`
           ],
-          keyID: '1', // Standard keyID for linkage verification
+          keyID: BTMS_KEY_ID, // Standard keyID for linkage verification
           counterparty: proof.prover
         }, this.originator)
 
@@ -1044,16 +1069,60 @@ export class BTMS {
       }
 
       // Verify only the selected UTXOs on overlay
-      const verificationPromises = selected.map(async (utxo) => {
+      type VerificationResult = { utxo: BTMSTokenOutput; found: boolean; beef?: Beef }
+      const verificationPromises = selected.map(async (utxo): Promise<VerificationResult> => {
         const { found, beef } = await this.lookupTokenOnOverlay(utxo.txid, utxo.outputIndex, true)
-        return { utxo, found, beef }
+        if (found) {
+          return { utxo, found, beef }
+        }
+        return { utxo, found: false, beef: undefined }
       })
 
       const verificationResults = await Promise.all(verificationPromises)
 
       // Separate valid and invalid UTXOs
-      const validResults = verificationResults.filter(r => r.found)
-      const invalidUtxos = verificationResults.filter(r => !r.found).map(r => r.utxo)
+      let validResults = verificationResults.filter(r => r.found)
+      let invalidUtxos = verificationResults.filter(r => !r.found).map(r => r.utxo)
+
+      // Re-broadcast missing UTXOs only if we need to fetch BEEF
+      if (invalidUtxos.length > 0) {
+        const needsBeef = invalidUtxos.some(utxo => !utxo.beef)
+        const assetId = selected[0]?.token.assetId
+        const beefMap = needsBeef && assetId
+          ? new Map((await this.getSpendableTokens(assetId, true)).tokens.map(utxo => [utxo.outpoint, utxo]))
+          : new Map<string, BTMSTokenOutput>()
+        const invalidWithBeef = invalidUtxos.map(utxo => beefMap.get(utxo.outpoint) ?? utxo)
+
+        const rebroadcastResults: VerificationResult[] = await Promise.all(
+          invalidWithBeef.map(async (utxo): Promise<VerificationResult> => {
+            if (!utxo.beef) {
+              return { utxo, found: false, beef: undefined }
+            }
+
+            try {
+              const tx = Transaction.fromAtomicBEEF(Transaction.fromBEEF(utxo.beef, utxo.txid).toAtomicBEEF())
+              const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
+                networkPreset: this.config.networkPreset
+              })
+              const response = await broadcaster.broadcast(tx)
+              if (response.status === 'success') {
+                return {
+                  utxo,
+                  found: true,
+                  beef: Beef.fromBinary(utxo.beef)
+                }
+              }
+            } catch {
+              // Fall through to mark as not found
+            }
+
+            return { utxo, found: false, beef: undefined }
+          })
+        )
+
+        validResults = [...validResults, ...rebroadcastResults.filter(r => r.found)]
+        invalidUtxos = rebroadcastResults.filter(r => !r.found).map(r => r.utxo)
+      }
 
       // Merge BEEF from valid UTXOs
       for (const result of validResults) {

@@ -51,7 +51,7 @@ export class BTMSToken {
 
   constructor(
     wallet?: WalletInterface,
-    protocolID: WalletProtocol = [0, 'btms tokens'],
+    protocolID: WalletProtocol = BTMS_PROTOCOL_ID,
     originator?: string
   ) {
     this.wallet = wallet ?? new WalletClient()

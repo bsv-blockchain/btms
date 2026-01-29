@@ -9,6 +9,20 @@
  * - Change selection with complex scenarios
  */
 
+// Mock TopicBroadcaster before importing BTMS
+const mockTopicBroadcasterBroadcast = jest.fn()
+const MockTopicBroadcasterClass = jest.fn().mockImplementation(() => ({
+  broadcast: mockTopicBroadcasterBroadcast
+}))
+
+jest.mock('@bsv/sdk', () => {
+  const actual = jest.requireActual('@bsv/sdk')
+  return {
+    ...actual,
+    TopicBroadcaster: MockTopicBroadcasterClass
+  }
+})
+
 import { BTMS } from '../BTMS.js'
 import { BTMSToken } from '../BTMSToken.js'
 import { BTMS_LABEL, BTMS_BASKET_PREFIX, getAssetBasket } from '../constants.js'
@@ -26,7 +40,7 @@ import type {
   GetPublicKeyResult,
   WalletProtocol
 } from '@bsv/sdk'
-import { PrivateKey, ProtoWallet } from '@bsv/sdk'
+import { PrivateKey, ProtoWallet, Transaction, TopicBroadcaster } from '@bsv/sdk'
 
 // Mock transaction data
 const MOCK_TXID = 'a'.repeat(64)
@@ -501,6 +515,55 @@ describe('BTMS', () => {
       expect(result.success).toBe(false)
       expect(result.error).toContain('No spendable tokens')
     })
+
+    it('should fail when selected tokens have mismatched metadata', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const assetId = `${MOCK_TXID}.0`
+      const utxoA = {
+        outpoint: `${'a'.repeat(64)}.0`,
+        txid: 'a'.repeat(64),
+        outputIndex: 0,
+        satoshis: 1,
+        lockingScript: 'mock-script',
+        customInstructions: JSON.stringify({ derivationPrefix: 'a', derivationSuffix: 'b' }),
+        token: {
+          valid: true as const,
+          assetId,
+          amount: 40,
+          metadata: { name: 'GOLD' },
+          lockingPublicKey: MOCK_IDENTITY_KEY
+        },
+        spendable: true
+      }
+      const utxoB = {
+        ...utxoA,
+        outpoint: `${'b'.repeat(64)}.0`,
+        txid: 'b'.repeat(64),
+        token: {
+          ...utxoA.token,
+          metadata: { name: 'SILVER' }
+        }
+      }
+
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: [utxoA, utxoB] })
+      const originalSelectAndVerify = (btms as any).selectAndVerifyUTXOs
+        ; (btms as any).selectAndVerifyUTXOs = jest.fn().mockResolvedValue({
+          selected: [utxoA, utxoB],
+          totalInput: 80,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      try {
+        const result = await btms.send(assetId, MOCK_RECIPIENT_KEY, 60)
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('Metadata mismatch')
+      } finally {
+        ; (btms as any).selectAndVerifyUTXOs = originalSelectAndVerify
+      }
+    })
   })
 
   describe('change selection (BTMS.selectUTXOs)', () => {
@@ -517,6 +580,10 @@ describe('BTMS', () => {
         outputIndex: 0,
         satoshis: 1,
         lockingScript: 'mock-script',
+        customInstructions: JSON.stringify({
+          derivationPrefix: `prefix-${i}`,
+          derivationSuffix: `suffix-${i}`
+        }),
         token: {
           valid: true as const,
           assetId: GOLD_ASSET_ID,
@@ -632,15 +699,27 @@ describe('BTMS', () => {
       const btms = new BTMS({ wallet: mockWallet })
 
       // Mock getSpendableTokens to return controlled UTXOs
-      btms.getSpendableTokens = jest.fn().mockResolvedValue(createMockUTXOs([20, 30, 10]))
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: createMockUTXOs([20, 30, 10]) })
 
-      // Attempt to send 61 gold (more than available 60)
-      const result = await btms.send(GOLD_ASSET_ID, MOCK_RECIPIENT_KEY, 61)
+      // Mock selectAndVerifyUTXOs to return the verification result
+      const originalSelectAndVerify = (btms as any).selectAndVerifyUTXOs
+        ; (btms as any).selectAndVerifyUTXOs = jest.fn().mockResolvedValue({
+          selected: createMockUTXOs([20, 30, 10]),
+          totalInput: 60,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
 
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('Insufficient balance')
-      expect(result.error).toContain('Have 60')
-      expect(result.error).toContain('need 61')
+      try {
+        // Attempt to send 61 gold (more than available 60)
+        const result = await btms.send(GOLD_ASSET_ID, MOCK_RECIPIENT_KEY, 61)
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('Insufficient balance')
+        expect(result.error).toContain('Have 60')
+        expect(result.error).toContain('need 61')
+      } finally {
+        ; (btms as any).selectAndVerifyUTXOs = originalSelectAndVerify
+      }
     })
   })
 
@@ -723,6 +802,10 @@ describe('Ownership Proof', () => {
       outputIndex: 0,
       satoshis: 1 as any,
       lockingScript: 'mock-script' as any,
+      customInstructions: JSON.stringify({
+        derivationPrefix: `prefix-${i}`,
+        derivationSuffix: `suffix-${i}`
+      }),
       token: {
         valid: true as const,
         assetId: GOLD_ASSET_ID,
@@ -785,7 +868,7 @@ describe('Ownership Proof', () => {
       const btms = new BTMS({ wallet: mockWallet })
 
       // Mock getSpendableTokens to return controlled UTXOs
-      btms.getSpendableTokens = jest.fn().mockResolvedValue(createMockUTXOs([20, 30, 10]))
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: createMockUTXOs([20, 30, 10]) })
 
       const result = await btms.proveOwnership(GOLD_ASSET_ID, 100, MOCK_VERIFIER_KEY)
 
@@ -794,6 +877,7 @@ describe('Ownership Proof', () => {
     })
 
     it('should select tokens using greedy algorithm', async () => {
+      const mockUTXOs = createMockUTXOs([20, 30, 10])
       const mockWallet = createMockWallet()
         // Add revealSpecificKeyLinkage to mock
         ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue({
@@ -806,20 +890,31 @@ describe('Ownership Proof', () => {
         })
 
       const btms = new BTMS({ wallet: mockWallet })
-      btms.getSpendableTokens = jest.fn().mockResolvedValue(createMockUTXOs([20, 30, 10]))
 
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, 31, MOCK_VERIFIER_KEY)
+      // Mock getSpendableTokens to return the UTXOs directly
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
 
-      expect(result.success).toBe(true)
-      expect(result.proof).toBeDefined()
-      expect(result.proof?.tokens.length).toBe(2) // 30 + 20 = 50 >= 31
-      expect(result.proof?.amount).toBe(31)
-      expect(result.proof?.assetId).toBe(GOLD_ASSET_ID)
-      expect(result.proof?.prover).toBe(MOCK_IDENTITY_KEY)
-      expect(result.proof?.verifier).toBe(MOCK_VERIFIER_KEY)
+      // Mock lookupTokenOnOverlay to return found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      try {
+        const result = await btms.proveOwnership(GOLD_ASSET_ID, 31, MOCK_VERIFIER_KEY)
+
+        expect(result.success).toBe(true)
+        expect(result.proof).toBeDefined()
+        expect(result.proof?.tokens.length).toBe(2) // 30 + 20 = 50 >= 31
+        expect(result.proof?.amount).toBe(31)
+        expect(result.proof?.assetId).toBe(GOLD_ASSET_ID)
+        expect(result.proof?.prover).toBe(MOCK_IDENTITY_KEY)
+        expect(result.proof?.verifier).toBe(MOCK_VERIFIER_KEY)
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+      }
     })
 
     it('should include key linkage for each token', async () => {
+      const mockUTXOs = createMockUTXOs([50]) as any[]
       const mockWallet = createMockWallet()
       const mockLinkage = {
         prover: MOCK_IDENTITY_KEY,
@@ -832,19 +927,29 @@ describe('Ownership Proof', () => {
         ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue(mockLinkage)
 
       const btms = new BTMS({ wallet: mockWallet })
-      btms.getSpendableTokens = jest.fn().mockResolvedValue(createMockUTXOs([50]))
 
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, 50, MOCK_VERIFIER_KEY)
+      // Mock getSpendableTokens to return the UTXOs directly
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
 
-      expect(result.success).toBe(true)
-      expect(result.proof?.tokens[0].linkage).toEqual({
-        prover: MOCK_IDENTITY_KEY,
-        verifier: MOCK_VERIFIER_KEY,
-        counterparty: MOCK_IDENTITY_KEY,
-        encryptedLinkage: [1, 2, 3],
-        encryptedLinkageProof: [4, 5, 6],
-        proofType: 1
-      })
+      // Mock lookupTokenOnOverlay to return found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      try {
+        const result = await btms.proveOwnership(GOLD_ASSET_ID, 50, MOCK_VERIFIER_KEY)
+
+        expect(result.success).toBe(true)
+        expect(result.proof?.tokens[0].linkage).toEqual({
+          prover: MOCK_IDENTITY_KEY,
+          verifier: MOCK_VERIFIER_KEY,
+          counterparty: MOCK_IDENTITY_KEY,
+          encryptedLinkage: [1, 2, 3],
+          encryptedLinkageProof: [4, 5, 6],
+          proofType: 1
+        })
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+      }
     })
   })
 
@@ -975,8 +1080,8 @@ describe('Ownership Proof', () => {
       const bobKey = bobPrivateKey.toPublicKey().toString()
 
       // Alice creates a real key linkage revelation for Bob
-      const protocolID: WalletProtocol = [0, 'btms tokens']
-      const keyID = '1'
+      const protocolID: WalletProtocol = [0, 'p btms']
+      const keyID = '1' // Using '1' for this test since it's testing real ProtoWallet encryption
 
       const linkageFromAliceToBob = await aliceWallet.revealSpecificKeyLinkage({
         counterparty: aliceKey, // Self-owned tokens
@@ -1066,14 +1171,13 @@ describe('Ownership Proof', () => {
       const originalLookup = (btms as any).lookupTokenOnOverlay
         ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: false })
 
-      // Mock TopicBroadcaster to fail
-      const mockBroadcast = jest.fn().mockResolvedValue({ status: 'error', description: 'Network error' })
-      jest.mock('@bsv/sdk', () => ({
-        ...jest.requireActual('@bsv/sdk'),
-        TopicBroadcaster: jest.fn().mockImplementation(() => ({
-          broadcast: mockBroadcast
-        }))
-      }))
+      // Mock Transaction.fromBEEF to avoid BEEF validation
+      const mockTx = { toBEEF: jest.fn().mockReturnValue([1, 2, 3]) }
+      const originalFromBEEF = Transaction.fromBEEF
+      Transaction.fromBEEF = jest.fn().mockReturnValue(mockTx)
+
+      // Configure the mocked TopicBroadcaster to return error
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'error', description: 'Network error' })
 
       const incomingToken = {
         txid: MOCK_TXID as any,
@@ -1098,11 +1202,15 @@ describe('Ownership Proof', () => {
       })
 
       try {
-        await expect(btms.accept(incomingToken)).rejects.toThrow('Token not found on overlay and broadcast failed!')
+        const result = await btms.accept(incomingToken)
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('Token not found on overlay and broadcast failed!')
       } finally {
         // Restore mocks
         ; (btms as any).lookupTokenOnOverlay = originalLookup
         BTMSToken.decode = originalDecode
+        Transaction.fromBEEF = originalFromBEEF
+        mockTopicBroadcasterBroadcast.mockReset()
       }
     })
 
@@ -1149,6 +1257,45 @@ describe('Ownership Proof', () => {
       }
     })
 
+    it('should accept token without beef when not on overlay', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: false })
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      } as any
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: `${MOCK_TXID}.0`,
+        amount: 100,
+        metadata: undefined
+      })
+
+      try {
+        const result = await btms.accept(incomingToken)
+
+        expect(result.success).toBe(true)
+        expect(mockWallet.calls.internalizeAction).toHaveLength(1)
+        expect(mockTopicBroadcasterBroadcast).not.toHaveBeenCalled()
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+        BTMSToken.decode = originalDecode
+      }
+    })
+
     it('should re-broadcast when token not on overlay but broadcast succeeds', async () => {
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
@@ -1157,11 +1304,13 @@ describe('Ownership Proof', () => {
       const originalLookup = (btms as any).lookupTokenOnOverlay
         ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: false })
 
-      // Mock successful broadcast
-      const mockBroadcast = jest.fn().mockResolvedValue({ status: 'success' })
-      const TopicBroadcasterMock = jest.fn().mockImplementation(() => ({
-        broadcast: mockBroadcast
-      }))
+      // Mock Transaction.fromBEEF to avoid BEEF validation
+      const mockTx = { toBEEF: jest.fn().mockReturnValue([1, 2, 3]) }
+      const originalFromBEEF = Transaction.fromBEEF
+      Transaction.fromBEEF = jest.fn().mockReturnValue(mockTx)
+
+      // Configure the mocked TopicBroadcaster to return success
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
 
       const incomingToken = {
         txid: MOCK_TXID as any,
@@ -1193,6 +1342,8 @@ describe('Ownership Proof', () => {
         // Restore mocks
         ; (btms as any).lookupTokenOnOverlay = originalLookup
         BTMSToken.decode = originalDecode
+        Transaction.fromBEEF = originalFromBEEF
+        mockTopicBroadcasterBroadcast.mockReset()
       }
     })
   })
