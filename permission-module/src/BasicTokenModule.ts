@@ -76,7 +76,7 @@ interface AuthorizedTransaction {
 }
 
 /**
- * BasicTokenModule - Production-grade BTMS Permission Module
+ * BasicTokenModule - BTMS Permission Module
  * 
  * SECURITY MODEL:
  * This module enforces permissions when spending BTMS tokens stored in

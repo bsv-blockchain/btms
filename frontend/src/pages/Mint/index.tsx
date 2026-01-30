@@ -6,8 +6,9 @@ import AddAPhotoIcon from '@mui/icons-material/AddAPhoto'
 import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import useStyles from './mint-style'
+import { StorageUploader } from '@bsv/sdk'
 
-import { btms } from '../../btms/index'
+import { btms, walletClient } from '../../btms/index'
 
 interface MintProps {
   history: {
@@ -21,6 +22,7 @@ const Mint: React.FC<MintProps> = ({ history }) => {
   const [quantity, setQuantity] = useState('')
   const [description, setDescription] = useState('')
   const [photoURL, setPhotoURL] = useState<string | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -31,6 +33,7 @@ const Mint: React.FC<MintProps> = ({ history }) => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0]
+      setPhotoFile(file)
       const urlReader = new FileReader()
       urlReader.onload = () => {
         setPhotoURL(urlReader.result as string)
@@ -47,7 +50,7 @@ const Mint: React.FC<MintProps> = ({ history }) => {
         name,
         quantity,
         descriptionLen: description.length,
-        hasImage: !!photoURL
+        hasImage: !!photoFile
       })
 
       if (name.trim() === '') {
@@ -68,12 +71,51 @@ const Mint: React.FC<MintProps> = ({ history }) => {
         return
       }
 
+      // Upload image to UHRP if provided
+      let iconURL: string | null = null
+      if (photoFile) {
+        try {
+          console.log(`[${traceId}] Uploading image to UHRP...`, {
+            fileName: photoFile.name,
+            fileSize: photoFile.size,
+            fileType: photoFile.type
+          })
+
+          // Read file as array buffer
+          const arrayBuffer = await photoFile.arrayBuffer()
+          const fileData = new Uint8Array(arrayBuffer)
+
+          // Upload to UHRP using StorageUploader
+          const uploader = new StorageUploader({
+            storageURL: 'https://nanostore.babbage.systems',
+            wallet: walletClient
+          })
+
+          const uploadResult = await uploader.publishFile({
+            file: {
+              data: fileData,
+              type: photoFile.type
+            },
+            retentionPeriod: 525600 // 1 year in minutes
+          })
+
+          iconURL = uploadResult.uhrpURL
+
+          console.log(`[${traceId}] Image uploaded to UHRP:`, iconURL)
+          toast.success('Image uploaded successfully!')
+        } catch (uploadErr: any) {
+          console.error(`[${traceId}] Failed to upload image to UHRP:`, uploadErr)
+          toast.error('Failed to upload image. Continuing without image.')
+          // Continue without image rather than failing the entire mint
+        }
+      }
+
       const amount = Number(quantity)
       console.log(`[${traceId}] Calling btms.issue(...)`, {
         amount,
         name,
         description,
-        hasImage: !!photoURL
+        iconURL
       })
       const res = await btms.issue(
         amount,
@@ -81,7 +123,7 @@ const Mint: React.FC<MintProps> = ({ history }) => {
         undefined, // symbol (unused)
         JSON.stringify({
           description,
-          iconURL: photoURL ?? null
+          iconURL
         })
       )
 

@@ -9,13 +9,17 @@ import {
   Stack,
   Divider,
   Avatar,
-  Chip
+  Chip,
+  IconButton,
+  Tooltip
 } from '@mui/material'
 import TokenIcon from '@mui/icons-material/Token'
 import AppsIcon from '@mui/icons-material/Apps'
 import SendIcon from '@mui/icons-material/Send'
 import PersonIcon from '@mui/icons-material/Person'
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import { Img } from '@bsv/uhrp-react'
 
 interface TokenUsagePromptProps {
   app: string
@@ -99,231 +103,158 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
   onDeny
 }) => {
   const spendInfo = useMemo(() => parseTokenMessage(message), [message])
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyAssetId = useCallback(() => {
+    if (spendInfo?.assetId) {
+      navigator.clipboard.writeText(spendInfo.assetId)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }, [spendInfo?.assetId])
 
   if (!spendInfo) {
     return null
   }
 
-  const hasRecipient = spendInfo.recipient && spendInfo.recipient.length > 0
-  const hasChange = spendInfo.changeAmount > 0
-  const hasAssetId = spendInfo.assetId && spendInfo.assetId.length > 0
-
   return (
     <Dialog
       open={true}
       onClose={onDeny}
-      maxWidth="sm"
+      maxWidth="xs"
       fullWidth
       PaperProps={{
         sx: {
           borderRadius: 3,
-          overflow: 'hidden'
+          bgcolor: '#1a1d29',
+          color: 'white'
         }
       }}
     >
-      {/* Header with gradient */}
-      <Box sx={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        p: 3,
-        color: 'white'
-      }}>
-        <Box display="flex" alignItems="center" gap={1.5}>
-          <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
-            <TokenIcon sx={{ fontSize: 28 }} />
-          </Avatar>
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              Token Transfer Request
-            </Typography>
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              Review and approve this transaction
-            </Typography>
-          </Box>
-        </Box>
-      </Box>
+      <DialogContent sx={{ p: 4, textAlign: 'center' }}>
+        <Typography variant="h5" fontWeight="bold" sx={{ mb: 4 }}>
+          Spend Authorization Request
+        </Typography>
 
-      <DialogContent sx={{ p: 3 }}>
-        <Stack spacing={3}>
-          {/* App requesting */}
-          <Box sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1.5,
-            p: 2,
-            backgroundColor: 'grey.50',
-            borderRadius: 2
-          }}>
-            <AppsIcon color="action" />
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block">
-                Requesting App
-              </Typography>
-              <Typography variant="body1" fontWeight="medium">
-                {app}
-              </Typography>
-            </Box>
-          </Box>
-
-          {/* Main amount display */}
-          <Box sx={{
-            textAlign: 'center',
-            p: 4,
-            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%)',
-            borderRadius: 3,
-            border: '2px solid',
-            borderColor: 'primary.light'
-          }}>
-            {spendInfo.iconURL && (
-              <Avatar
+        <Box sx={{
+          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+          borderRadius: 3,
+          p: 4,
+          mb: 3
+        }}>
+          {/* Token Icon */}
+          {spendInfo.iconURL ? (
+            <Box sx={{
+              width: 80,
+              height: 80,
+              mx: 'auto',
+              mb: 3,
+              borderRadius: '50%',
+              overflow: 'hidden',
+              bgcolor: 'rgba(255, 255, 255, 0.1)'
+            }}>
+              <Img
                 src={spendInfo.iconURL}
-                sx={{ width: 64, height: 64, mx: 'auto', mb: 2 }}
-              >
-                <TokenIcon sx={{ fontSize: 32 }} />
-              </Avatar>
-            )}
-            <Typography variant="h3" fontWeight="bold" color="primary.main" gutterBottom>
-              {formatAmount(spendInfo.sendAmount)}
-            </Typography>
-            <Typography variant="h5" color="text.primary" fontWeight="medium">
-              {spendInfo.tokenName}
-            </Typography>
-            {hasAssetId && (
-              <Chip
-                label={truncateHex(spendInfo.assetId, 12, 8)}
-                size="small"
-                variant="outlined"
-                sx={{ mt: 1.5, fontFamily: 'monospace', fontSize: '0.75rem' }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
-            )}
-          </Box>
+            </Box>
+          ) : (
+            <Avatar sx={{
+              width: 80,
+              height: 80,
+              mx: 'auto',
+              mb: 3,
+              bgcolor: 'rgba(255, 255, 255, 0.1)'
+            }}>
+              <TokenIcon sx={{ fontSize: 40, color: 'white' }} />
+            </Avatar>
+          )}
 
-          {/* Transaction details */}
-          <Box sx={{
-            backgroundColor: 'grey.50',
-            borderRadius: 2,
-            overflow: 'hidden'
-          }}>
-            {/* Recipient */}
-            {hasRecipient && (
-              <Box sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                p: 2,
-                borderBottom: '1px solid',
-                borderColor: 'divider'
-              }}>
-                <Avatar sx={{ bgcolor: 'success.light', width: 36, height: 36 }}>
-                  <PersonIcon sx={{ fontSize: 20, color: 'success.dark' }} />
-                </Avatar>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    Recipient
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    fontFamily="monospace"
-                    sx={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {spendInfo.recipient}...
-                  </Typography>
-                </Box>
-                <SendIcon color="action" sx={{ fontSize: 20 }} />
-              </Box>
-            )}
-
-            {/* Change info */}
-            {hasChange && (
-              <Box sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                p: 2
-              }}>
-                <Avatar sx={{ bgcolor: 'info.light', width: 36, height: 36 }}>
-                  <SwapHorizIcon sx={{ fontSize: 20, color: 'info.dark' }} />
-                </Avatar>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    Change (returned to you)
-                  </Typography>
-                  <Typography variant="body2" fontWeight="medium">
-                    {formatAmount(spendInfo.changeAmount)} {spendInfo.tokenName}
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-
-            {/* Total from inputs */}
-            {spendInfo.totalInputAmount > spendInfo.sendAmount && (
-              <Box sx={{
-                p: 2,
-                backgroundColor: 'grey.100',
-                borderTop: '1px solid',
-                borderColor: 'divider'
-              }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center">
-                  <Typography variant="body2" color="text.secondary">
-                    Total from wallet
-                  </Typography>
-                  <Typography variant="body2" fontWeight="medium">
-                    {formatAmount(spendInfo.totalInputAmount)} tokens
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-          </Box>
-
-          {/* Warning/info box */}
-          <Box sx={{
-            p: 2,
-            backgroundColor: 'warning.lighter',
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: 'warning.light'
-          }}>
-            <Typography variant="body2" color="warning.dark">
-              <strong>Review carefully:</strong> This action will transfer tokens from your wallet.
-              Only approve if you trust this application.
-            </Typography>
-          </Box>
-        </Stack>
+          {/* Authorization Message */}
+          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
+            Authorize <strong>{app}</strong> to spend
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
+            {formatAmount(spendInfo.sendAmount)} {spendInfo.tokenName} tokens
+          </Typography>
+          {spendInfo.assetId && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1.5 }}>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.6)',
+                  fontFamily: 'monospace',
+                  fontSize: '0.75rem'
+                }}
+              >
+                {truncateHex(spendInfo.assetId, 12, 8)}
+              </Typography>
+              <Tooltip title={copied ? 'Copied!' : 'Copy Asset ID'} arrow>
+                <IconButton
+                  onClick={handleCopyAssetId}
+                  size="small"
+                  sx={{
+                    color: 'rgba(255, 255, 255, 0.6)',
+                    padding: '4px',
+                    '&:hover': {
+                      color: 'rgba(255, 255, 255, 0.9)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                    }
+                  }}
+                >
+                  <ContentCopyIcon sx={{ fontSize: '0.875rem' }} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
+        </Box>
       </DialogContent>
 
-      <Divider />
-
-      <DialogActions sx={{ p: 2.5, gap: 1.5 }}>
+      <DialogActions sx={{ p: 3, gap: 2 }}>
         <Button
           onClick={onDeny}
-          color="inherit"
           variant="outlined"
           size="large"
           fullWidth
-          sx={{ borderRadius: 2, py: 1.5 }}
+          sx={{
+            borderRadius: 999,
+            py: 1,
+            borderWidth: 2,
+            borderColor: 'rgba(255, 255, 255, 0.3)',
+            color: 'rgba(255, 255, 255, 0.9)',
+            textTransform: 'none',
+            fontWeight: 600,
+            '&:hover': {
+              borderColor: 'rgba(255, 255, 255, 0.5)',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              transform: 'translateY(-1px)'
+            }
+          }}
         >
           Deny
         </Button>
         <Button
           onClick={onAllow}
-          color="primary"
           variant="contained"
           size="large"
           autoFocus
           fullWidth
           sx={{
-            borderRadius: 2,
-            py: 1.5,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: 999,
+            py: 1,
+            backgroundImage: 'linear-gradient(120deg, #6756FF, #FF7EB3)',
+            color: '#FFFFFF',
+            textTransform: 'none',
+            fontWeight: 600,
+            boxShadow: '0 8px 16px rgba(103,86,255,0.3)',
             '&:hover': {
-              background: 'linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%)'
+              backgroundImage: 'linear-gradient(120deg, #5645EE, #EE6DA2)',
+              transform: 'translateY(-1px)',
+              boxShadow: '0 12px 24px rgba(103,86,255,0.4)'
             }
           }}
         >
-          Approve Transfer
+          Approve
         </Button>
       </DialogActions>
     </Dialog>

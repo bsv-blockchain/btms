@@ -270,9 +270,6 @@ export class BTMS {
         throw new Error('Amount must be a positive integer')
       }
 
-      // Get sender identity
-      const senderKey = await this.getIdentityKey()
-      debugger
       // Fetch spendable UTXOs for this asset
       const { tokens: utxos } = await this.getSpendableTokens(assetId)
 
