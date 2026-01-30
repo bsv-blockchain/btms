@@ -12,9 +12,6 @@ import type {
   PubKeyHex,
   TXIDHexString,
   HexString,
-  BasketStringUnder300Bytes,
-  WalletProtocol,
-  KeyIDStringUnder800Bytes
 } from '@bsv/sdk'
 
 // ---------------------------------------------------------------------------
@@ -373,6 +370,22 @@ export interface AcceptResult {
   error?: string
 }
 
+/**
+ * Result of a token melt (burn) operation
+ */
+export interface MeltResult {
+  /** Whether the operation succeeded */
+  success: boolean
+  /** Transaction ID */
+  txid: TXIDHexString
+  /** Asset ID that was melted */
+  assetId: string
+  /** Amount of tokens melted (destroyed) */
+  amountMelted: number
+  /** Error message if failed */
+  error?: string
+}
+
 // ---------------------------------------------------------------------------
 // Configuration Types
 // ---------------------------------------------------------------------------
@@ -381,34 +394,12 @@ export interface AcceptResult {
  * BTMS configuration options
  */
 export interface BTMSConfig {
-  /** Wallet interface for signing transactions */
+  /** Wallet interface for signing transactions (default: new WalletClient()) */
   wallet?: WalletInterface
-  /** Network preset for overlay services */
+  /** Network preset for overlay services (default: 'mainnet') */
   networkPreset?: 'local' | 'mainnet' | 'testnet'
-  /** Custom overlay host URLs */
-  overlayHosts?: string[]
-  /** Satoshi value for token outputs (default: 1) */
-  tokenSatoshis?: SatoshiValue
-  /** Protocol ID for wallet operations */
-  protocolID?: WalletProtocol
-  /** Key ID for protocol operations */
-  keyID?: KeyIDStringUnder800Bytes
   /** Optional communications layer for token messaging (e.g., MessageBoxClient) */
   comms?: CommsLayer
-  /** Message box name for token delivery (default: 'btms_tokens') */
-  messageBox?: string
-}
-
-/**
- * Resolved BTMS configuration with defaults applied
- */
-export interface ResolvedBTMSConfig {
-  wallet: WalletInterface
-  networkPreset: 'local' | 'mainnet' | 'testnet'
-  overlayHosts: string[]
-  tokenSatoshis: SatoshiValue
-  comms?: CommsLayer
-  messageBox: string
 }
 
 // ---------------------------------------------------------------------------

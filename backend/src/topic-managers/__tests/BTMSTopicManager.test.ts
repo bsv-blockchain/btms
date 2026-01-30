@@ -392,6 +392,98 @@ describe('BTMS Topic Manager', () => {
     })
   })
 
+  describe('Token melting (burning)', () => {
+    it('Allows melting tokens by spending inputs without creating outputs', async () => {
+      // Source transaction with tokens to melt
+      const sourceTx = new Transaction()
+      sourceTx.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
+
+      // Transaction that spends the tokens but doesn't create any token outputs (melting/burning)
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      // No token outputs - tokens are melted/burned
+      // Could have a non-token output for change/fees, but no BTMS token outputs
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
+
+      // No outputs to admit (none exist), no coins to retain (asset not in outputs)
+      expect(admitted).toEqual({
+        outputsToAdmit: [],
+        coinsToRetain: []
+      })
+    })
+
+    it('Allows partial melting - spending more inputs than outputs', async () => {
+      // Source transactions with tokens
+      const sourceTx1 = new Transaction()
+      sourceTx1.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
+
+      const sourceTx2 = new Transaction()
+      sourceTx2.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '150']), satoshis: 1000 })
+
+      // Transaction that spends 250 tokens but only outputs 100 (melting 150)
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx1,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      tx.addInput({
+        sourceTransaction: sourceTx2,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      // Only output 100 tokens, effectively melting 150
+      tx.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
+
+      // Output is valid (100 <= 250), coins retained for the asset
+      expect(admitted).toEqual({
+        outputsToAdmit: [0],
+        coinsToRetain: [0, 1]
+      })
+    })
+
+    it('Allows melting entire balance across multiple assets', async () => {
+      // Multiple assets to melt
+      const goldSource = new Transaction()
+      goldSource.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
+
+      const silverSource = new Transaction()
+      silverSource.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_silver.0', '200']), satoshis: 1000 })
+
+      // Transaction that spends both but creates no token outputs
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: goldSource,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      tx.addInput({
+        sourceTransaction: silverSource,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      // No token outputs - all tokens melted
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
+
+      // No outputs, no coins retained
+      expect(admitted).toEqual({
+        outputsToAdmit: [],
+        coinsToRetain: []
+      })
+    })
+  })
+
   describe('Complex transactions', () => {
     it('Splits one asset, merges a second, issues a third, and transfers a fourth, all in the same transaction', async () => {
       // Source transactions

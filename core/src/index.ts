@@ -83,10 +83,10 @@ export type {
   IssueResult,
   SendResult,
   AcceptResult,
+  MeltResult,
 
   // Configuration types
   BTMSConfig,
-  ResolvedBTMSConfig,
 
   // Messaging types
   CommsLayer,

@@ -29,14 +29,13 @@ import {
   OutputTagStringUnder300Bytes,
   PositiveIntegerOrZero,
   Random,
-  WalletProtocol
+  WalletInterface
 } from '@bsv/sdk'
 
 import { BTMSToken } from './BTMSToken.js'
 import { parseCustomInstructions } from './utils.js'
 import type {
   BTMSConfig,
-  ResolvedBTMSConfig,
   BTMSAsset,
   BTMSAssetMetadata,
   BTMSTokenOutput,
@@ -53,7 +52,9 @@ import type {
   SelectionResult,
   ChangeStrategyOptions,
   ChangeContext,
-  ChangeOutput
+  ChangeOutput,
+  CommsLayer,
+  MeltResult
 } from './types.js'
 import {
   BTMS_TOPIC,
@@ -62,6 +63,7 @@ import {
   BTMS_KEY_ID,
   BTMS_LABEL,
   BTMS_BASKET_PREFIX,
+  BTMS_MESSAGE_BOX,
   DEFAULT_TOKEN_SATOSHIS,
   ISSUE_MARKER,
   getAssetBasket
@@ -91,15 +93,21 @@ import {
  * ```
  */
 export class BTMS {
-  private config: ResolvedBTMSConfig
+  private wallet: WalletInterface
+  private networkPreset: 'local' | 'mainnet' | 'testnet'
+  private comms?: CommsLayer
   private tokenTemplate: BTMSToken
   private cachedIdentityKey?: PubKeyHex
   private originator?: string
 
   constructor(config: BTMSConfig = {}) {
-    this.config = this.resolveConfig(config)
+    // Apply defaults
+    this.wallet = (config.wallet ?? new WalletClient('auto'))
+    this.networkPreset = config.networkPreset ?? 'mainnet'
+    this.comms = config.comms
+
     this.tokenTemplate = new BTMSToken(
-      this.config.wallet,
+      this.wallet,
       BTMS_PROTOCOL_ID,
       this.originator
     )
@@ -113,7 +121,7 @@ export class BTMS {
     this.originator = originator
     // Recreate token template with new originator
     this.tokenTemplate = new BTMSToken(
-      this.config.wallet,
+      this.wallet,
       BTMS_PROTOCOL_ID,
       this.originator
     )
@@ -157,13 +165,22 @@ export class BTMS {
 
       const tokenName = metadata?.name ?? 'tokens'
 
+      const monthLabel = this.getMonthLabel()
+      const counterparty = await this.getIdentityKey()
+
       // Build the action WITHOUT a basket - we'll internalize after to use the real assetId
       const args: CreateActionArgs = {
         description: `Issue ${amount} ${tokenName}`,
-        labels: [BTMS_LABEL as LabelStringUnder300Bytes],
+        labels: [
+          BTMS_LABEL as LabelStringUnder300Bytes,
+          'btms_type_issue' as LabelStringUnder300Bytes,
+          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          monthLabel,
+          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+        ],
         outputs: [
           {
-            satoshis: this.config.tokenSatoshis,
+            satoshis: DEFAULT_TOKEN_SATOSHIS,
             lockingScript: lockingScriptHex,
             customInstructions: JSON.stringify({
               derivationPrefix,
@@ -180,7 +197,7 @@ export class BTMS {
       }
 
       // Create the action (no basket yet)
-      const createResult = await this.config.wallet.createAction(args, this.originator)
+      const createResult = await this.wallet.createAction(args)
 
       if (!createResult.tx || !createResult.txid) {
         throw new Error('Transaction creation failed - no tx returned')
@@ -191,8 +208,16 @@ export class BTMS {
 
       // Now internalize the action into the correct basket using the real assetId
       const basket = getAssetBasket(assetId)
-      await this.config.wallet.internalizeAction({
+      await this.wallet.internalizeAction({
         tx: createResult.tx,
+        labels: [
+          BTMS_LABEL as LabelStringUnder300Bytes,
+          'btms_type_issue' as LabelStringUnder300Bytes,
+          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          monthLabel,
+          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
+          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+        ],
         outputs: [{
           outputIndex: 0 as PositiveIntegerOrZero,
           protocol: 'basket insertion',
@@ -205,13 +230,12 @@ export class BTMS {
             tags: ['btms_issue'] as OutputTagStringUnder300Bytes[]
           }
         }],
-        labels: [BTMS_LABEL],
         description: `Issue ${amount} ${tokenName}`
-      }, this.originator)
+      })
 
       // Broadcast to overlay
       const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
-        networkPreset: this.config.networkPreset
+        networkPreset: this.networkPreset
       })
       const broadcastResult = await broadcaster.broadcast(Transaction.fromAtomicBEEF(createResult.tx))
 
@@ -317,14 +341,14 @@ export class BTMS {
       const recipientScriptHex = recipientScript.toHex() as HexString
 
       outputs.push({
-        satoshis: this.config.tokenSatoshis,
+        satoshis: DEFAULT_TOKEN_SATOSHIS,
         lockingScript: recipientScriptHex,
         customInstructions: JSON.stringify({
           derivationPrefix: transferDerivationPrefix,
           derivationSuffix: recipientDerivationSuffix
         }),
         outputDescription: `Send ${amount} tokens`,
-        tags: ['btms_transfer'] as OutputTagStringUnder300Bytes[]
+        tags: ['btms_send'] as OutputTagStringUnder300Bytes[]
       })
 
       // Change outputs (if needed)
@@ -353,7 +377,7 @@ export class BTMS {
           )
 
           outputs.push({
-            satoshis: this.config.tokenSatoshis,
+            satoshis: DEFAULT_TOKEN_SATOSHIS,
             lockingScript: changeScript.toHex(),
             customInstructions: JSON.stringify({
               derivationPrefix: transferDerivationPrefix,
@@ -372,11 +396,18 @@ export class BTMS {
         unlockingScriptLength: 74,
         inputDescription: `Spend ${u.token.amount} tokens`
       }))
-      console.log(inputBeef.toHex())
+      const monthLabel = this.getMonthLabel()
       // Create the action with BEEF from overlay
       const createArgs: CreateActionArgs = {
         description: `Send ${amount} tokens to ${recipient.slice(0, 8)}...`,
-        labels: [BTMS_LABEL as LabelStringUnder300Bytes],
+        labels: [
+          BTMS_LABEL as LabelStringUnder300Bytes,
+          'btms_type_send' as LabelStringUnder300Bytes,
+          'btms_direction_outgoing' as LabelStringUnder300Bytes,
+          monthLabel,
+          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
+          `btms_counterparty_${recipient}` as LabelStringUnder300Bytes
+        ],
         inputBEEF: inputBeef.toBinary(),
         inputs,
         outputs,
@@ -386,47 +417,14 @@ export class BTMS {
         }
       }
 
-      const { signableTransaction } = await this.config.wallet.createAction(createArgs, this.originator)
+      const { signableTransaction } = await this.wallet.createAction(createArgs)
 
       if (!signableTransaction) {
         throw new Error('Failed to create signable transaction')
       }
 
-      // Sign all inputs with their respective keyIDs and counterparties
-      const txForSigning = Transaction.fromAtomicBEEF(signableTransaction.tx)
-      const spends: Record<number, { unlockingScript: string }> = {}
-      for (let i = 0; i < selected.length; i++) {
-        const utxo = selected[i]
-        const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
-        // Use senderIdentityKey as counterparty if present (received tokens), otherwise 'self' (issued tokens)
-        const counterparty = senderIdentityKey ?? 'self'
-        const unlocker = this.tokenTemplate.createUnlocker(counterparty, keyID)
-        const unlockingScript = await unlocker.sign(txForSigning, i)
-        spends[i] = { unlockingScript: unlockingScript.toHex() }
-      }
-
-      // Sign the action
-      const signResult = await this.config.wallet.signAction({
-        reference: signableTransaction.reference,
-        spends
-      }, this.originator)
-
-      if (!signResult.tx) {
-        throw new Error('Failed to sign transaction')
-      }
-
-      const finalTx = Transaction.fromAtomicBEEF(signResult.tx)
-      const txid = finalTx.id('hex') as TXIDHexString
-
-      // Broadcast to overlay
-      const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
-        networkPreset: this.config.networkPreset
-      })
-      const broadcastResult = await broadcaster.broadcast(finalTx)
-
-      if (broadcastResult.status !== 'success') {
-        throw new Error(`Broadcast failed: ${(broadcastResult as any).description || 'Unknown error'}`)
-      }
+      const spends = await this.buildSpendsForInputs(selected, signableTransaction.tx)
+      const { tx: signedTx, txid } = await this.signAndBroadcast(signableTransaction.reference, spends)
 
       // Build token data for recipient
       const tokenForRecipient: TokenForRecipient = {
@@ -434,8 +432,8 @@ export class BTMS {
         outputIndex: 0,
         lockingScript: recipientScriptHex,
         amount,
-        satoshis: this.config.tokenSatoshis,
-        beef: signResult.tx,
+        satoshis: DEFAULT_TOKEN_SATOSHIS,
+        beef: signedTx,
         customInstructions: JSON.stringify({
           derivationPrefix: transferDerivationPrefix,
           derivationSuffix: recipientDerivationSuffix
@@ -445,10 +443,10 @@ export class BTMS {
       }
 
       // Send to recipient via comms layer (if configured and not sending to self)
-      if (this.config.comms) {
-        await this.config.comms.sendMessage({
+      if (this.comms) {
+        await this.comms.sendMessage({
           recipient,
-          messageBox: this.config.messageBox,
+          messageBox: BTMS_MESSAGE_BOX,
           body: JSON.stringify(tokenForRecipient)
         })
       }
@@ -470,6 +468,167 @@ export class BTMS {
   }
 
   // ---------------------------------------------------------------------------
+  // Melting (Burning) Tokens
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Melt (burn/destroy) tokens permanently.
+   * 
+   * This operation spends token UTXOs without creating corresponding outputs,
+   * effectively destroying the tokens. This is useful when tokens represent
+   * claims on physical assets that have been redeemed (e.g., trading gold
+   * tokens for physical gold).
+   * 
+   * @param assetId - The asset to melt
+   * @param amount - Amount to melt (if undefined, melts entire balance)
+   * @param options - Optional change strategy for remaining balance
+   * @returns Melt result with transaction details
+   * 
+   * @example
+   * ```typescript
+   * // Melt 50 tokens
+   * const result = await btms.melt('abc123.0', 50)
+   * 
+   * // Melt entire balance
+   * const result = await btms.melt('abc123.0')
+   * ```
+   */
+  async melt(
+    assetId: string,
+    amount?: number,
+    options: { changeStrategy?: ChangeStrategyOptions } = {}
+  ): Promise<MeltResult> {
+    try {
+      // Validate inputs
+      if (!BTMSToken.isValidAssetId(assetId)) {
+        throw new Error(`Invalid assetId: ${assetId}`)
+      }
+      if (amount !== undefined && (amount < 1 || !Number.isInteger(amount))) {
+        throw new Error('Amount must be a positive integer')
+      }
+
+      // Fetch spendable UTXOs for this asset
+      const { tokens: utxos } = await this.getSpendableTokens(assetId)
+
+      if (utxos.length === 0) {
+        throw new Error(`No spendable tokens found for asset ${assetId}`)
+      }
+
+      // Calculate total available
+      const totalAvailable = utxos.reduce((sum, u) => sum + u.token.amount, 0)
+
+      // Determine amount to melt
+      const amountToMelt = amount ?? totalAvailable
+
+      if (amountToMelt > totalAvailable) {
+        throw new Error(`Insufficient balance. Have ${totalAvailable}, trying to melt ${amountToMelt}`)
+      }
+
+      // Select UTXOs to cover the amount to melt
+      const { selected, totalInput, inputBeef } = await this.selectAndVerifyUTXOs(utxos, amountToMelt)
+
+      // Get metadata from first selected UTXO (for change output if needed)
+      const metadata = selected[0].token.metadata
+
+      // Build outputs (only change if partial melt)
+      const outputs: CreateActionOutput[] = []
+      const changeAmount = totalInput - amountToMelt
+
+      if (changeAmount > 0) {
+        // Partial melt - return change to self using the specified strategy
+        const basket = getAssetBasket(assetId)
+        const changeDerivationPrefix = Utils.toBase64(Random(32))
+
+        const changeContext: ChangeContext = {
+          changeAmount,
+          paymentAmount: amountToMelt,
+          totalInput,
+          assetId
+        }
+        const changeOutputs = BTMS.computeChangeOutputs(changeContext, options.changeStrategy)
+
+        for (const changeOutput of changeOutputs) {
+          const changeDerivationSuffix = Utils.toBase64(Random(32))
+          const changeKeyID = `${changeDerivationPrefix} ${changeDerivationSuffix}`
+
+          const changeScript = await this.tokenTemplate.createTransfer(
+            assetId,
+            changeOutput.amount,
+            changeKeyID,
+            'self',
+            metadata
+          )
+
+          outputs.push({
+            satoshis: DEFAULT_TOKEN_SATOSHIS,
+            lockingScript: changeScript.toHex(),
+            customInstructions: JSON.stringify({
+              derivationPrefix: changeDerivationPrefix,
+              derivationSuffix: changeDerivationSuffix
+            }),
+            basket,
+            outputDescription: `Change after melting: ${changeOutput.amount} tokens`,
+            tags: ['btms_change'] as OutputTagStringUnder300Bytes[]
+          })
+        }
+      }
+
+      // Build inputs
+      const inputs = selected.map(u => ({
+        outpoint: u.outpoint as OutpointString,
+        unlockingScriptLength: 74,
+        inputDescription: `Melt ${u.token.amount} tokens`
+      }))
+      const monthLabel = this.getMonthLabel()
+      const counterparty = await this.getIdentityKey()
+
+      // Create the action
+      const createArgs: CreateActionArgs = {
+        description: `Melt ${amountToMelt} tokens of ${assetId.slice(0, 8)}...`,
+        labels: [
+          BTMS_LABEL as LabelStringUnder300Bytes,
+          'btms_type_melt' as LabelStringUnder300Bytes,
+          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          monthLabel,
+          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
+          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+        ],
+        inputBEEF: inputBeef.toBinary(),
+        inputs,
+        outputs,
+        options: {
+          acceptDelayedBroadcast: false,
+          randomizeOutputs: false
+        }
+      }
+
+      const { signableTransaction } = await this.wallet.createAction(createArgs)
+
+      if (!signableTransaction) {
+        throw new Error('Failed to create signable transaction')
+      }
+
+      const spends = await this.buildSpendsForInputs(selected, signableTransaction.tx)
+      const { txid } = await this.signAndBroadcast(signableTransaction.reference, spends)
+
+      return {
+        success: true,
+        txid,
+        assetId,
+        amountMelted: amountToMelt
+      }
+    } catch (error) {
+      return {
+        success: false,
+        txid: '' as TXIDHexString,
+        assetId,
+        amountMelted: 0,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Receiving Tokens
   // ---------------------------------------------------------------------------
 
@@ -480,12 +639,12 @@ export class BTMS {
    * @returns List of incoming payments
    */
   async listIncoming(assetId?: string): Promise<IncomingToken[]> {
-    if (!this.config.comms) {
+    if (!this.comms) {
       return []
     }
 
-    const messages = await this.config.comms.listMessages({
-      messageBox: this.config.messageBox
+    const messages = await this.comms.listMessages({
+      messageBox: BTMS_MESSAGE_BOX
     })
 
     const payments: IncomingToken[] = []
@@ -531,7 +690,7 @@ export class BTMS {
       if (!isOnOverlay && token.beef) {
         const tx = Transaction.fromBEEF(token.beef)
         const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
-          networkPreset: this.config.networkPreset
+          networkPreset: this.networkPreset
         })
         const response = await broadcaster.broadcast(tx)
         if (response.status !== 'success') {
@@ -548,12 +707,12 @@ export class BTMS {
       )
 
       // Derive the public key we would use to unlock this token
-      const { publicKey: derivedPubKey } = await this.config.wallet.getPublicKey({
+      const { publicKey: derivedPubKey } = await this.wallet.getPublicKey({
         protocolID: BTMS_PROTOCOL_ID,
         keyID,
         counterparty: token.sender,
         forSelf: true
-      }, this.originator)
+      })
 
       // Compare with the locking public key embedded in the script
       if (decoded.lockingPublicKey !== derivedPubKey) {
@@ -570,11 +729,19 @@ export class BTMS {
         ...originalInstructions,
         senderIdentityKey: token.sender
       })
+      const monthLabel = this.getMonthLabel()
 
       const basket = getAssetBasket(token.assetId)
-      await this.config.wallet.internalizeAction({
+      await this.wallet.internalizeAction({
         tx: token.beef,
-        labels: [BTMS_LABEL],
+        labels: [
+          BTMS_LABEL as LabelStringUnder300Bytes,
+          'btms_type_receive' as LabelStringUnder300Bytes,
+          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          monthLabel,
+          `btms_assetId_${token.assetId}` as LabelStringUnder300Bytes,
+          `btms_counterparty_${token.sender}` as LabelStringUnder300Bytes
+        ],
         outputs: [
           {
             outputIndex: token.outputIndex as PositiveIntegerOrZero,
@@ -588,11 +755,11 @@ export class BTMS {
         ],
         description: `Receive ${token.amount} tokens`,
         seekPermission: true
-      }, this.originator)
+      })
 
       // Acknowledge receipt via comms layer
-      if (this.config.comms && token.messageId) {
-        await this.config.comms.acknowledgeMessage({
+      if (this.comms && token.messageId) {
+        await this.comms.acknowledgeMessage({
           messageIds: [token.messageId]
         })
       }
@@ -637,11 +804,11 @@ export class BTMS {
 
     // Discover assets via listActions with 'btms' label
     try {
-      const actionsResult: ListActionsResult = await this.config.wallet.listActions({
+      const actionsResult: ListActionsResult = await this.wallet.listActions({
         labels: [BTMS_LABEL],
         includeOutputs: true,
         limit: 10000
-      }, this.originator)
+      })
 
       const basketPrefix = BTMS_BASKET_PREFIX + ' '
       for (const action of actionsResult.actions) {
@@ -660,10 +827,10 @@ export class BTMS {
 
     // Get all incoming payments once (used for both discovery and per-asset checks)
     const allIncoming: IncomingToken[] = []
-    if (this.config.comms) {
+    if (this.comms) {
       try {
-        const messages = await this.config.comms.listMessages({
-          messageBox: this.config.messageBox
+        const messages = await this.comms.listMessages({
+          messageBox: BTMS_MESSAGE_BOX
         })
         for (const msg of messages) {
           try {
@@ -734,13 +901,13 @@ export class BTMS {
   ): Promise<{ tokens: BTMSTokenOutput[], beef?: Beef }> {
     const basket = getAssetBasket(assetId)
 
-    const result: ListOutputsResult = await this.config.wallet.listOutputs({
+    const result: ListOutputsResult = await this.wallet.listOutputs({
       basket,
       include: includeBeef ? 'entire transactions' : 'locking scripts',
       includeTags: true,
       includeCustomInstructions: true,
       limit: 10000
-    }, this.originator)
+    })
 
     const tokens: BTMSTokenOutput[] = []
 
@@ -749,7 +916,7 @@ export class BTMS {
     for (const output of result.outputs) {
       console.log('[BTMS] checking output:', output.outpoint, 'spendable:', output.spendable, 'satoshis:', output.satoshis)
       if (!output.spendable) continue
-      if (output.satoshis !== this.config.tokenSatoshis) continue
+      if (output.satoshis !== DEFAULT_TOKEN_SATOSHIS) continue
 
       const [txid, outputIndexStr] = output.outpoint.split('.')
       const outputIndex = Number(outputIndexStr)
@@ -858,12 +1025,12 @@ export class BTMS {
 
         // Reveal specific key linkage for this token
         // The counterparty is 'self' for tokens we own (resolved to our own key)
-        const linkageResult = await this.config.wallet.revealSpecificKeyLinkage({
+        const linkageResult = await this.wallet.revealSpecificKeyLinkage({
           counterparty: prover, // Self-owned tokens use our own key as counterparty
           verifier,
           protocolID: BTMS_PROTOCOL_ID,
           keyID
-        }, this.originator)
+        })
 
         provenTokens.push({
           output: {
@@ -959,7 +1126,7 @@ export class BTMS {
 
         // Decrypt the linkage to verify the prover owns the key
         // The verifier decrypts using their key and the prover as counterparty
-        const { plaintext: linkage } = await this.config.wallet.decrypt({
+        const { plaintext: linkage } = await this.wallet.decrypt({
           ciphertext: provenToken.linkage.encryptedLinkage,
           protocolID: [
             2,
@@ -967,7 +1134,7 @@ export class BTMS {
           ],
           keyID: BTMS_KEY_ID, // Standard keyID for linkage verification
           counterparty: proof.prover
-        }, this.originator)
+        })
 
         // The linkage should be a valid HMAC - if decryption succeeded,
         // it proves the prover has the corresponding private key
@@ -1021,7 +1188,7 @@ export class BTMS {
     includeBeef = false
   ): Promise<{ found: boolean; beef?: Beef }> {
     try {
-      const lookup = new LookupResolver({ networkPreset: this.config.networkPreset })
+      const lookup = new LookupResolver({ networkPreset: this.networkPreset })
       const result = await lookup.query({
         service: BTMS_LOOKUP_SERVICE,
         query: { txid, outputIndex }
@@ -1047,12 +1214,64 @@ export class BTMS {
    */
   async getIdentityKey(): Promise<PubKeyHex> {
     if (!this.cachedIdentityKey) {
-      const { publicKey } = await this.config.wallet.getPublicKey({
+      const { publicKey } = await this.wallet.getPublicKey({
         identityKey: true
-      }, this.originator)
+      })
       this.cachedIdentityKey = publicKey as PubKeyHex
     }
     return this.cachedIdentityKey
+  }
+
+  private getMonthLabel(): LabelStringUnder300Bytes {
+    const now = new Date()
+    const year = now.getUTCFullYear()
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0')
+    return `btms_month_${year}-${month}` as LabelStringUnder300Bytes
+  }
+
+  private async buildSpendsForInputs(
+    selected: BTMSTokenOutput[],
+    unsignedTx: number[]
+  ): Promise<Record<number, { unlockingScript: string }>> {
+    const txForSigning = Transaction.fromAtomicBEEF(unsignedTx)
+    const spends: Record<number, { unlockingScript: string }> = {}
+    for (let i = 0; i < selected.length; i++) {
+      const utxo = selected[i]
+      const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
+      const counterparty = senderIdentityKey ?? 'self'
+      const unlocker = this.tokenTemplate.createUnlocker(counterparty, keyID)
+      const unlockingScript = await unlocker.sign(txForSigning, i)
+      spends[i] = { unlockingScript: unlockingScript.toHex() }
+    }
+    return spends
+  }
+
+  private async signAndBroadcast(
+    reference: string,
+    spends: Record<number, { unlockingScript: string }>
+  ): Promise<{ tx: number[]; txid: TXIDHexString }> {
+    const signResult = await this.wallet.signAction({
+      reference,
+      spends
+    })
+
+    if (!signResult.tx) {
+      throw new Error('Failed to sign transaction')
+    }
+
+    const finalTx = Transaction.fromAtomicBEEF(signResult.tx)
+    const txid = finalTx.id('hex') as TXIDHexString
+
+    const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
+      networkPreset: this.networkPreset
+    })
+    const broadcastResult = await broadcaster.broadcast(finalTx)
+
+    if (broadcastResult.status !== 'success') {
+      throw new Error(`Broadcast failed: ${(broadcastResult as any).description || 'Unknown error'}`)
+    }
+
+    return { tx: signResult.tx, txid }
   }
 
   /**
@@ -1125,7 +1344,7 @@ export class BTMS {
             try {
               const tx = Transaction.fromAtomicBEEF(Transaction.fromBEEF(utxo.beef, utxo.txid).toAtomicBEEF())
               const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
-                networkPreset: this.config.networkPreset
+                networkPreset: this.networkPreset
               })
               const response = await broadcaster.broadcast(tx)
               if (response.status === 'success') {
@@ -1372,18 +1591,4 @@ export class BTMS {
     return Math.floor(min + ((max - min) * Math.log10(1 + 1 / d)) / Math.log10(10))
   }
 
-  // ---------------------------------------------------------------------------
-  // Private Methods
-  // ---------------------------------------------------------------------------
-
-  private resolveConfig(config: BTMSConfig): ResolvedBTMSConfig {
-    return {
-      wallet: config.wallet ?? new WalletClient(),
-      networkPreset: config.networkPreset ?? 'mainnet',
-      overlayHosts: config.overlayHosts ?? [],
-      tokenSatoshis: config.tokenSatoshis ?? DEFAULT_TOKEN_SATOSHIS,
-      comms: config.comms,
-      messageBox: config.messageBox ?? 'btms_tokens'
-    }
-  }
 }

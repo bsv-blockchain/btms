@@ -23,6 +23,9 @@ export const ISSUE_MARKER = 'ISSUE'
 /** Default satoshi value for BTMS token outputs */
 export const DEFAULT_TOKEN_SATOSHIS = 1 as SatoshiValue
 
+/** Message box for BTMS token payments */
+export const BTMS_MESSAGE_BOX = 'btms_tokens'
+
 // ---------------------------------------------------------------------------
 // Wallet Protocol Constants
 // ---------------------------------------------------------------------------

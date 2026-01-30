@@ -46,6 +46,7 @@ import { PrivateKey, ProtoWallet, Transaction, TopicBroadcaster } from '@bsv/sdk
 const MOCK_TXID = 'a'.repeat(64)
 const MOCK_IDENTITY_KEY = '03' + 'b'.repeat(64)
 const MOCK_RECIPIENT_KEY = '03' + 'c'.repeat(64)
+const MOCK_MONTH_LABEL = 'btms_month_2026-01'
 
 // Helper to create mock atomic BEEF (simplified for testing)
 function createMockAtomicBEEF(txid: string): number[] {
@@ -724,14 +725,33 @@ describe('BTMS', () => {
   })
 
   describe('labeling and tagging', () => {
-    it('should use btms label for all transactions', async () => {
+    it('should add issue labels on createAction and internalizeAction', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
       await btms.issue(100, { name: 'TEST' })
 
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
-      expect(createActionCall.labels).toEqual([BTMS_LABEL])
+      expect(createActionCall.labels).toEqual([
+        BTMS_LABEL,
+        'btms_type_issue',
+        'btms_direction_incoming',
+        MOCK_MONTH_LABEL,
+        `btms_counterparty_${MOCK_IDENTITY_KEY}`
+      ])
+
+      const internalizeCall = mockWallet.calls.internalizeAction[0]
+      expect(internalizeCall.labels).toEqual([
+        BTMS_LABEL,
+        'btms_type_issue',
+        'btms_direction_incoming',
+        MOCK_MONTH_LABEL,
+        `btms_assetId_${MOCK_TXID}.0`,
+        `btms_counterparty_${MOCK_IDENTITY_KEY}`
+      ])
+      jest.useRealTimers()
     })
 
     it('should use btms_issue tag for issuance outputs', async () => {
@@ -754,6 +774,138 @@ describe('BTMS', () => {
       // using the real assetId (txid.0) after transaction creation
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
       expect(createActionCall.outputs?.[0].basket).toBeUndefined()
+    })
+
+    it('should label send actions with asset and recipient', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+      const assetId = `${MOCK_TXID}.0`
+
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId, amount: 50, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 50,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = { id: jest.fn().mockReturnValue(MOCK_TXID) }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
+
+      try {
+        const result = await btms.send(assetId, MOCK_RECIPIENT_KEY, 50)
+        expect(result.success).toBe(true)
+
+        const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
+        expect(createActionCall.labels).toEqual([
+          BTMS_LABEL,
+          'btms_type_send',
+          'btms_direction_outgoing',
+          MOCK_MONTH_LABEL,
+          `btms_assetId_${assetId}`,
+          `btms_counterparty_${MOCK_RECIPIENT_KEY}`
+        ])
+      } finally {
+        jest.useRealTimers()
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+
+    it('should label melt actions with asset and melt tag', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+      const assetId = `${MOCK_TXID}.0`
+
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId, amount: 50, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 50,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = { id: jest.fn().mockReturnValue(MOCK_TXID) }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
+
+      try {
+        const result = await btms.melt(assetId, 50)
+        expect(result.success).toBe(true)
+
+        const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
+        expect(createActionCall.labels).toEqual([
+          BTMS_LABEL,
+          'btms_type_melt',
+          'btms_direction_incoming',
+          MOCK_MONTH_LABEL,
+          `btms_assetId_${assetId}`,
+          `btms_counterparty_${MOCK_IDENTITY_KEY}`
+        ])
+      } finally {
+        jest.useRealTimers()
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
     })
   })
 
@@ -1215,6 +1367,8 @@ describe('Ownership Proof', () => {
     })
 
     it('should succeed when token is found on overlay', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
@@ -1247,16 +1401,23 @@ describe('Ownership Proof', () => {
 
       try {
         const result = await btms.accept(incomingToken)
-        if (!result.success) {
-          console.log('Accept failed with error:', result.error)
-        }
         expect(result.success).toBe(true)
         expect(result.assetId).toBe(`${MOCK_TXID}.0`)
         expect(result.amount).toBe(100)
         expect(mockWallet.calls.internalizeAction).toHaveLength(1)
+        const internalizeCall = mockWallet.calls.internalizeAction[0]
+        expect(internalizeCall.labels).toEqual([
+          BTMS_LABEL,
+          'btms_type_receive',
+          'btms_direction_incoming',
+          MOCK_MONTH_LABEL,
+          `btms_assetId_${MOCK_TXID}.0`,
+          `btms_counterparty_${MOCK_RECIPIENT_KEY}`
+        ])
       } finally {
-        // Restore mocks
-        ; (btms as any).lookupTokenOnOverlay = originalLookup
+        jest.useRealTimers()
+          // Restore mocks
+          ; (btms as any).lookupTokenOnOverlay = originalLookup
         BTMSToken.decode = originalDecode
       }
     })
@@ -1349,6 +1510,428 @@ describe('Ownership Proof', () => {
         ; (btms as any).lookupTokenOnOverlay = originalLookup
         BTMSToken.decode = originalDecode
         Transaction.fromBEEF = originalFromBEEF
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+  })
+
+  describe('listIncoming', () => {
+    it('should return empty list when no comms layer is configured', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.listIncoming()
+
+      expect(result).toEqual([])
+    })
+
+    it('should return all incoming messages when comms is configured', async () => {
+      const mockWallet = createMockWallet()
+      const mockComms = {
+        listMessages: jest.fn().mockResolvedValue([
+          {
+            messageId: 'msg-1',
+            sender: MOCK_RECIPIENT_KEY,
+            body: JSON.stringify({
+              assetId: `${MOCK_TXID}.0`,
+              amount: 10,
+              txid: MOCK_TXID,
+              outputIndex: 0,
+              lockingScript: '00',
+              satoshis: 1,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+            })
+          },
+          {
+            messageId: 'msg-2',
+            sender: MOCK_RECIPIENT_KEY,
+            body: JSON.stringify({
+              assetId: 'other-asset',
+              amount: 5,
+              txid: MOCK_TXID,
+              outputIndex: 1,
+              lockingScript: '00',
+              satoshis: 1,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+            })
+          }
+        ])
+      }
+
+      const btms = new BTMS({ wallet: mockWallet, comms: mockComms as any })
+
+      const result = await btms.listIncoming()
+
+      expect(mockComms.listMessages).toHaveBeenCalledWith({ messageBox: 'btms_tokens' })
+      expect(result).toHaveLength(2)
+      expect(result[0].messageId).toBe('msg-1')
+      expect(result[1].messageId).toBe('msg-2')
+    })
+
+    it('should filter incoming messages by assetId', async () => {
+      const mockWallet = createMockWallet()
+      const mockComms = {
+        listMessages: jest.fn().mockResolvedValue([
+          {
+            messageId: 'msg-1',
+            sender: MOCK_RECIPIENT_KEY,
+            body: JSON.stringify({
+              assetId: `${MOCK_TXID}.0`,
+              amount: 10,
+              txid: MOCK_TXID,
+              outputIndex: 0,
+              lockingScript: '00',
+              satoshis: 1,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+            })
+          },
+          {
+            messageId: 'msg-2',
+            sender: MOCK_RECIPIENT_KEY,
+            body: JSON.stringify({
+              assetId: 'other-asset',
+              amount: 5,
+              txid: MOCK_TXID,
+              outputIndex: 1,
+              lockingScript: '00',
+              satoshis: 1,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+            })
+          }
+        ])
+      }
+
+      const btms = new BTMS({ wallet: mockWallet, comms: mockComms as any })
+
+      const result = await btms.listIncoming(`${MOCK_TXID}.0`)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].assetId).toBe(`${MOCK_TXID}.0`)
+    })
+  })
+
+  describe('melt', () => {
+    const MOCK_ASSET_ID = `${MOCK_TXID}.0`
+
+    it('should melt entire balance when amount is not specified', async () => {
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId: MOCK_ASSET_ID, amount: 50, metadata: undefined }
+        },
+        {
+          txid: MOCK_TXID,
+          outputIndex: 1,
+          outpoint: `${MOCK_TXID}.1`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId: MOCK_ASSET_ID, amount: 50, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 100,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = {
+        id: jest.fn().mockReturnValue(MOCK_TXID)
+      }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
+
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      try {
+        const result = await btms.melt(MOCK_ASSET_ID)
+
+        expect(result.success).toBe(true)
+        expect(result.assetId).toBe(MOCK_ASSET_ID)
+        expect(result.amountMelted).toBe(100)
+        expect(result.txid).toBe(MOCK_TXID)
+
+        expect(mockWallet.calls.createAction).toHaveLength(1)
+        const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
+        expect(createActionCall.inputs?.length).toBe(2)
+        expect(createActionCall.outputs?.length).toBe(0)
+        expect(createActionCall.description).toContain('Melt 100 tokens')
+
+        expect(mockWallet.calls.signAction).toHaveLength(1)
+      } finally {
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+
+    it('should fail when trying to melt more than available balance', async () => {
+      const mockWallet = createMockWallet({
+        listOutputsResult: {
+          totalOutputs: 1,
+          outputs: [
+            {
+              outpoint: `${MOCK_TXID}.0`,
+              satoshis: 1,
+              lockingScript: '00',
+              spendable: true,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+              tags: ['btms_received']
+            }
+          ]
+        }
+      })
+
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock BTMSToken.decode to return valid token with 50 amount
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: MOCK_ASSET_ID,
+        amount: 50,
+        metadata: undefined,
+        lockingPublicKey: MOCK_IDENTITY_KEY
+      })
+
+      // Mock selectAndVerifyUTXOs to avoid BEEF handling complexity
+      const originalSelectAndVerify = (btms as any).selectAndVerifyUTXOs
+        ; (btms as any).selectAndVerifyUTXOs = jest.fn().mockResolvedValue({
+          selected: [
+            {
+              txid: MOCK_TXID,
+              outputIndex: 0,
+              outpoint: `${MOCK_TXID}.0`,
+              customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+              token: { assetId: MOCK_ASSET_ID, amount: 50, metadata: undefined }
+            }
+          ],
+          totalInput: 50,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      // Mock Transaction.fromAtomicBEEF to avoid BEEF parsing
+      const mockTx = {
+        id: jest.fn().mockReturnValue(MOCK_TXID),
+        sign: jest.fn(),
+        toBEEF: jest.fn().mockReturnValue([1, 2, 3])
+      }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      // Configure the mocked TopicBroadcaster to return failure
+      mockTopicBroadcasterBroadcast.mockResolvedValue({
+        status: 'error',
+        description: 'Network error'
+      })
+
+      try {
+        // Try to melt 100 tokens when only 50 available
+        const result = await btms.melt(MOCK_ASSET_ID, 100)
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('Insufficient balance')
+        expect(result.error).toContain('Have 50')
+        expect(result.error).toContain('trying to melt 100')
+        expect(result.amountMelted).toBe(0)
+      } finally {
+        BTMSToken.decode = originalDecode
+          ; (btms as any).selectAndVerifyUTXOs = originalSelectAndVerify
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+
+    it('should fail when no spendable tokens found', async () => {
+      const mockWallet = createMockWallet({
+        listOutputsResult: {
+          totalOutputs: 0,
+          outputs: []
+        }
+      })
+
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.melt(MOCK_ASSET_ID, 50)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('No spendable tokens found')
+      expect(result.amountMelted).toBe(0)
+    })
+
+    it('should fail with invalid asset ID', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.melt('invalid-asset-id', 50)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Invalid assetId')
+      expect(result.amountMelted).toBe(0)
+    })
+
+    it('should fail with invalid amount (negative)', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.melt(MOCK_ASSET_ID, -10)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Amount must be a positive integer')
+      expect(result.amountMelted).toBe(0)
+    })
+
+    it('should fail with invalid amount (non-integer)', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.melt(MOCK_ASSET_ID, 10.5)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Amount must be a positive integer')
+      expect(result.amountMelted).toBe(0)
+    })
+
+    it('should fail when broadcast fails', async () => {
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId: MOCK_ASSET_ID, amount: 50, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 50,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = {
+        id: jest.fn().mockReturnValue(MOCK_TXID)
+      }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({
+        status: 'error',
+        description: 'Network error'
+      })
+
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      try {
+        const result = await btms.melt(MOCK_ASSET_ID, 50)
+
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('Broadcast failed')
+        expect(result.amountMelted).toBe(0)
+      } finally {
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+
+    it('should split change outputs using change strategy options', async () => {
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId: MOCK_ASSET_ID, amount: 100, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 100,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = { id: jest.fn().mockReturnValue(MOCK_TXID) }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
+
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      try {
+        const result = await btms.melt(MOCK_ASSET_ID, 10, {
+          changeStrategy: { strategy: 'split-equal', splitCount: 2 }
+        })
+
+        expect(result.success).toBe(true)
+
+        const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
+        expect(createActionCall.outputs).toHaveLength(2)
+        expect(createActionCall.outputs?.[0].outputDescription).toContain('45 tokens')
+        expect(createActionCall.outputs?.[1].outputDescription).toContain('45 tokens')
+      } finally {
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
         mockTopicBroadcasterBroadcast.mockReset()
       }
     })
