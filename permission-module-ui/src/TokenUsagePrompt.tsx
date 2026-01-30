@@ -271,12 +271,12 @@ export interface FocusHandlers {
 }
 
 /**
- * Hook for managing BTMS token usage prompts.
+ * Hook for managing BTMS token spend prompts.
  * Returns a function that can be called to prompt the user and a component to render.
  * 
  * @param focusHandlers - Optional focus management handlers for desktop apps
  */
-export const useTokenUsagePrompt = (focusHandlers?: FocusHandlers) => {
+export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
   const wasOriginallyFocusedRef = useRef(false)
 
   const [promptState, setPromptState] = useState<{

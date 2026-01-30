@@ -82,14 +82,14 @@ Ensure you have the following installed:
 First, create the prompt function with optional focus handlers for desktop applications.
 
 ```typescript
-import { useTokenUsagePrompt, type FocusHandlers } from '@bsv/btms-permission-module'
+import { useTokenSpendPrompt, type FocusHandlers } from '@bsv/btms-permission-module'
 import { UserContext } from './UserContext' // Your app's context
 
 // In your wallet context provider component:
 const { isFocused, onFocusRequested, onFocusRelinquished } = useContext(UserContext)
 
 // Setup the hook with focus handlers (optional - omit for web-only apps)
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenUsagePrompt({
+const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt({
   isFocused,
   onFocusRequested,
   onFocusRelinquished
@@ -99,7 +99,7 @@ const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenUsagePr
 **For web-only applications** (no window focus management):
 
 ```typescript
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenUsagePrompt()
+const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt()
 ```
 
 ### Step 2: Initialize BasicTokenModule
@@ -157,9 +157,9 @@ return (
 
 ## API Reference
 
-### `useTokenUsagePrompt(focusHandlers?: FocusHandlers)`
+### `useTokenSpendPrompt(focusHandlers?: FocusHandlers)`
 
-React hook for managing token usage prompts.
+React hook for managing token spend prompts.
 
 **Parameters:**
 - `focusHandlers` (optional): Object containing window focus management functions
@@ -221,7 +221,7 @@ interface FocusHandlers {
 ```typescript
 import React, { useContext, useState } from 'react'
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client'
-import { BasicTokenModule, useTokenUsagePrompt } from '@bsv/btms-permission-module'
+import { BasicTokenModule, useTokenSpendPrompt } from '@bsv/btms-permission-module'
 
 export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [wallet, setWallet] = useState(null)
@@ -229,8 +229,8 @@ export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({
   // Get focus handlers from your app context (desktop apps only)
   const { isFocused, onFocusRequested, onFocusRelinquished } = useContext(UserContext)
   
-  // Step 1: Setup token usage prompt with focus handlers
-  const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenUsagePrompt({
+  // Step 1: Setup token spend prompt with focus handlers
+  const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt({
     isFocused,
     onFocusRequested,
     onFocusRelinquished
@@ -282,7 +282,7 @@ export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({
 
 ```typescript
 // Simplified for web applications without window focus management
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenUsagePrompt()
+const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt()
 
 const basicTokenModule = new BasicTokenModule(promptUserForTokenUsage)
 

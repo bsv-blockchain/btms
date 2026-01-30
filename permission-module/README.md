@@ -86,9 +86,9 @@ Then use the provided hook:
 
 ```typescript
 import { BasicTokenModule } from '@bsv/btms-permission-module'
-import { useTokenUsagePrompt } from '@bsv/btms-permission-module-ui'
+import { useTokenSpendPrompt } from '@bsv/btms-permission-module-ui'
 
-const { promptUser, PromptComponent } = useTokenUsagePrompt()
+const { promptUser, PromptComponent } = useTokenSpendPrompt()
 const basicTokenModule = new BasicTokenModule(promptUser)
 
 // Render the component

@@ -23,11 +23,11 @@ npm install react @mui/material @mui/icons-material
 ### Basic Setup
 
 ```typescript
-import { useTokenUsagePrompt } from '@bsv/btms-permission-module-ui'
+import { useTokenSpendPrompt } from '@bsv/btms-permission-module-ui'
 import { BasicTokenModule } from '@bsv/btms-permission-module'
 
 // Setup the UI hook
-const { promptUser, PromptComponent } = useTokenUsagePrompt()
+const { promptUser, PromptComponent } = useTokenSpendPrompt()
 
 // Create the permission module with the prompt function
 const basicTokenModule = new BasicTokenModule(promptUser)
@@ -44,11 +44,11 @@ return (
 ### With Focus Management (Desktop Apps)
 
 ```typescript
-import { useTokenUsagePrompt, type FocusHandlers } from '@bsv/btms-permission-module-ui'
+import { useTokenSpendPrompt, type FocusHandlers } from '@bsv/btms-permission-module-ui'
 
 const { isFocused, onFocusRequested, onFocusRelinquished } = useContext(UserContext)
 
-const { promptUser, PromptComponent } = useTokenUsagePrompt({
+const { promptUser, PromptComponent } = useTokenSpendPrompt({
   isFocused,
   onFocusRequested,
   onFocusRelinquished
@@ -57,7 +57,7 @@ const { promptUser, PromptComponent } = useTokenUsagePrompt({
 
 ## API
 
-### `useTokenUsagePrompt(focusHandlers?: FocusHandlers)`
+### `useTokenSpendPrompt(focusHandlers?: FocusHandlers)`
 
 React hook for managing token usage prompts.
 
