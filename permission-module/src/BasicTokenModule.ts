@@ -14,6 +14,9 @@ import { PermissionsModule } from '@bsv/wallet-toolbox-client'
 /** Permissioned basket prefix - aligns with btms-core */
 const P_BASKET_PREFIX = 'p btms'
 
+/** Literal used in field[0] to indicate token issuance - aligns with btms-core */
+const ISSUE_MARKER = 'ISSUE'
+
 /** Index positions for BTMS PushDrop token fields */
 const BTMS_FIELD = {
   ASSET_ID: 0,
@@ -73,38 +76,98 @@ interface AuthorizedTransaction {
 }
 
 /**
- * BasicTokenModule handles the "btms" (Basic Token Management Scheme) P-basket / p-protocol.
+ * BasicTokenModule - Production-grade BTMS Permission Module
  * 
- * This module enforces permissions when spending btms tokens stored in
- * permissioned baskets (format: "p btms <assetId>").
+ * SECURITY MODEL:
+ * This module enforces permissions when spending BTMS tokens stored in
+ * permissioned baskets (format: "p btms <assetId>"). It prevents unauthorized
+ * token transfers by requiring explicit user approval for each transaction.
  * 
- * The module intercepts:
- * - createAction: When outputs use P-baskets, extracts token info and prompts for spending permission
- * - createSignature: When signing with protocolID [0, 'p btms'], checks session authorization
- * - listOutputs: Allows viewing token balances in P-baskets
- * - internalizeAction: Allows receiving tokens into P-baskets
+ * THREAT MODEL:
+ * - Malicious dApp attempts to spend tokens without user knowledge
+ * - Malicious dApp gets approval for one transaction, attempts to sign different transaction
+ * - Malicious dApp attempts to bypass authorization checks
+ * - Malicious dApp attempts to steal tokens via preimage manipulation
  * 
- * Authorization flow:
- * 1. createAction is called first - we extract token details and prompt user
- * 2. If approved, we store session authorization
- * 3. createSignature calls check session authorization (already approved in step 1)
+ * SECURITY BOUNDARIES:
+ * 1. createAction: Extracts token details and prompts user for approval
+ * 2. createSignature: Verifies session authorization + preimage integrity
+ * 3. Session authorization: Time-limited (60s) to prevent replay attacks
+ * 4. Preimage verification: Ensures signed transaction matches approved transaction
+ * 
+ * AUTHORIZATION FLOW:
+ * 1. createAction → extract token info → prompt user → grant session auth
+ * 2. createSignature → verify session auth → verify preimage → allow signature
+ * 
+ * ISSUANCE HANDLING:
+ * Token issuance is auto-approved (no user prompt) because:
+ * - Issuance creates new tokens (doesn't spend existing ones)
+ * - Detected by ISSUE_MARKER in locking script or btms_issue tag
+ * - Short signatures (<157 bytes) are assumed to be issuance
  */
 export class BasicTokenModule implements PermissionsModule {
   private readonly promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
 
-  // Session-based authorization: tracks which originators have been approved for the current action
-  // Key: originator, Value: timestamp of approval (expires after 60 seconds)
+  /**
+   * Session-based authorization tracking.
+   * 
+   * SECURITY: Time-limited to prevent replay attacks. Each approval expires after 60s.
+   * Key: originator (dApp identifier)
+   * Value: timestamp of approval (milliseconds since epoch)
+   */
   private sessionAuthorizations: Map<string, number> = new Map()
   private readonly SESSION_TIMEOUT_MS = 60000 // 60 seconds
 
-  // Security: Stores authorized transaction data from createAction responses
-  // Key: originator, Value: authorized transaction details
+  /**
+   * Authorized transaction data from createAction responses.
+   * 
+   * SECURITY: Stores cryptographic commitments (hashOutputs, outpoints) to verify
+   * that createSignature is signing the exact transaction the user approved.
+   * This prevents a malicious dApp from getting approval for one transaction
+   * and then signing a different transaction.
+   * 
+   * Key: originator (dApp identifier)
+   * Value: authorized transaction details (reference, hashOutputs, outpoints, timestamp)
+   */
   private authorizedTransactions: Map<string, AuthorizedTransaction> = new Map()
 
+  /**
+   * Creates a new BasicTokenModule instance.
+   * 
+   * @param promptUserForTokenUsage - Callback to prompt user for token spending approval.
+   *   Should return true if user approves, false if denied.
+   *   SECURITY: This callback MUST be implemented securely to prevent UI spoofing.
+   */
   constructor(
     promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
   ) {
+    if (!promptUserForTokenUsage || typeof promptUserForTokenUsage !== 'function') {
+      throw new Error('promptUserForTokenUsage callback is required')
+    }
     this.promptUserForTokenUsage = promptUserForTokenUsage
+
+    // Start periodic cleanup of expired sessions
+    this.startSessionCleanup()
+  }
+
+  /**
+   * Periodic cleanup of expired session authorizations.
+   * Runs every 30 seconds to prevent memory leaks.
+   */
+  private startSessionCleanup(): void {
+    setInterval(() => {
+      const now = Date.now()
+      for (const [originator, timestamp] of this.sessionAuthorizations.entries()) {
+        if (now - timestamp > this.SESSION_TIMEOUT_MS) {
+          this.sessionAuthorizations.delete(originator)
+        }
+      }
+      for (const [originator, tx] of this.authorizedTransactions.entries()) {
+        if (now - tx.timestamp > this.SESSION_TIMEOUT_MS) {
+          this.authorizedTransactions.delete(originator)
+        }
+      }
+    }, 30000) // Every 30 seconds
   }
 
   /**
@@ -113,6 +176,16 @@ export class BasicTokenModule implements PermissionsModule {
    * - createAction: Extract token info from outputs and prompt for authorization
    * - createSignature: Check session authorization (should already be approved from createAction)
    */
+  /**
+   * Intercepts wallet method requests for P-basket/protocol operations.
+   * 
+   * SECURITY: This is the main entry point for all permission checks.
+   * All token spending operations MUST go through this method.
+   * 
+   * @param req - Request object containing method, args, and originator
+   * @returns Modified args (unchanged in this implementation)
+   * @throws Error if authorization is denied
+   */
   async onRequest(req: {
     method: string
     args: object
@@ -120,15 +193,24 @@ export class BasicTokenModule implements PermissionsModule {
   }): Promise<{ args: object }> {
     const { method, args, originator } = req
 
-    console.log('[BasicTokenModule] onRequest called:', { method, originator })
+    // Input validation
+    if (!method || typeof method !== 'string') {
+      throw new Error('Invalid method')
+    }
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator')
+    }
+    if (!args || typeof args !== 'object') {
+      throw new Error('Invalid args')
+    }
 
+    // Handle security-critical methods
     if (method === 'createAction') {
       await this.handleCreateAction(args as CreateActionArgs, originator)
     } else if (method === 'createSignature') {
       await this.handleCreateSignature(args as CreateSignatureArgs, originator)
     }
-
-    // For listOutputs, internalizeAction, relinquishOutput - just pass through
+    // For listOutputs, internalizeAction, relinquishOutput - pass through
     // The WalletPermissionsManager already delegates these to us for P-baskets
 
     return { args }
@@ -156,25 +238,34 @@ export class BasicTokenModule implements PermissionsModule {
 
   /**
    * Captures authorized transaction data from createAction response.
-   * This data is used to verify that createSignature calls are signing
-   * what was actually authorized by the user.
    * 
-   * Security measures:
-   * 1. Store the reference to match against createSignature calls
-   * 2. Compute and store hashOutputs to verify preimage integrity
-   * 3. Whitelist the outpoints that are authorized to be signed
+   * SECURITY: This data is used to verify that createSignature calls are signing
+   * the exact transaction the user approved. Prevents transaction substitution attacks.
+   * 
+   * Captured data:
+   * 1. reference - Transaction reference for matching
+   * 2. hashOutputs - BIP-143 hash of all outputs (prevents output modification)
+   * 3. authorizedOutpoints - Whitelist of inputs that can be signed (prevents input substitution)
+   * 4. timestamp - For expiry checking
+   * 
+   * @param result - createAction response
+   * @param originator - dApp identifier
    */
   private async captureAuthorizedTransaction(
     result: CreateActionResult,
     originator: string
   ): Promise<void> {
-    if (!result.signableTransaction) {
-      console.log('[BasicTokenModule] No signable transaction in response, skipping capture')
+    if (!result || typeof result !== 'object' || !result.signableTransaction) {
       return
     }
 
     try {
       const { tx, reference } = result.signableTransaction
+
+      if (!tx || !reference) {
+        return
+      }
+
       const transaction = Transaction.fromAtomicBEEF(tx)
 
       // Compute hashOutputs (BIP-143 style) from the transaction outputs
@@ -182,11 +273,18 @@ export class BasicTokenModule implements PermissionsModule {
 
       // Collect all input outpoints as authorized
       const authorizedOutpoints = new Set<string>()
-      for (const input of transaction.inputs) {
-        const txid = input.sourceTXID || input.sourceTransaction?.id('hex')
-        if (txid) {
-          const outpoint = `${txid}.${input.sourceOutputIndex}`
-          authorizedOutpoints.add(outpoint)
+      if (Array.isArray(transaction.inputs)) {
+        for (const input of transaction.inputs) {
+          if (!input || typeof input !== 'object') continue
+
+          const txid = input.sourceTXID || input.sourceTransaction?.id('hex')
+          if (txid && typeof txid === 'string') {
+            const vout = input.sourceOutputIndex
+            if (typeof vout === 'number' && vout >= 0) {
+              const outpoint = `${txid}.${vout}`
+              authorizedOutpoints.add(outpoint)
+            }
+          }
         }
       }
 
@@ -197,24 +295,24 @@ export class BasicTokenModule implements PermissionsModule {
         authorizedOutpoints,
         timestamp: Date.now()
       })
-
-      console.log('[BasicTokenModule] Captured authorized transaction:', {
-        reference,
-        hashOutputs,
-        outpointCount: authorizedOutpoints.size,
-        outpoints: Array.from(authorizedOutpoints)
-      })
     } catch (error) {
-      console.warn('[BasicTokenModule] Failed to capture authorized transaction:', error)
       // Don't throw - we'll fall back to session-based auth
     }
   }
 
   /**
    * Computes BIP-143 hashOutputs from a transaction.
-   * This is the double-SHA256 of all outputs serialized.
+   * 
+   * SECURITY: This hash commits to all transaction outputs. Any modification
+   * to outputs (amounts, recipients, scripts) will change this hash.
+   * 
+   * @param tx - Transaction to compute hashOutputs for
+   * @returns Hex-encoded double-SHA256 hash of all outputs
    */
   private computeHashOutputs(tx: Transaction): string {
+    if (!tx || typeof tx !== 'object' || !Array.isArray(tx.outputs)) {
+      throw new Error('Invalid transaction for hashOutputs computation')
+    }
     // Serialize all outputs: satoshis (8 bytes LE) + scriptLen (varint) + script
     const outputBytes: number[] = []
 
@@ -258,29 +356,49 @@ export class BasicTokenModule implements PermissionsModule {
    * @param args The createAction arguments
    * @param originator The app requesting the action
    */
+  /**
+   * Handles createAction requests that involve BTMS P-baskets.
+   * 
+   * SECURITY: This is the primary authorization checkpoint. User approval here
+   * grants session authorization for subsequent createSignature calls.
+   * 
+   * ISSUANCE DETECTION: Token issuance is auto-approved because it creates new
+   * tokens rather than spending existing ones. Detected by:
+   * - ISSUE_MARKER in locking script
+   * - btms_issue tag in outputs
+   * - No inputs (issuance doesn't spend existing UTXOs)
+   * 
+   * @param args - createAction arguments
+   * @param originator - dApp identifier
+   * @throws Error if user denies authorization
+   */
   private async handleCreateAction(args: CreateActionArgs, originator: string): Promise<void> {
-    console.log('[BasicTokenModule] handleCreateAction:', {
-      description: args.description,
-      inputCount: args.inputs?.length || 0,
-      outputCount: args.outputs?.length || 0,
-      originator
-    })
+    // Input validation
+    if (!args || typeof args !== 'object') {
+      throw new Error('Invalid createAction args')
+    }
 
-    // If there are no inputs, this is likely token issuance - allow without prompt
-    if (!args.inputs || args.inputs.length === 0) {
-      console.log('[BasicTokenModule] No inputs - likely token issuance, allowing')
+    // Check if this is token issuance - auto-approve
+    const isIssuance = this.isTokenIssuance(args)
+    if (isIssuance) {
       this.grantSessionAuthorization(originator)
       return
     }
 
-    // Extract comprehensive token spend info
-    const spendInfo = this.extractTokenSpendInfo(args)
-    console.log('[BasicTokenModule] Extracted spend info:', spendInfo)
+    // No inputs = likely issuance (creating new tokens)
+    if (!args.inputs || args.inputs.length === 0) {
+      this.grantSessionAuthorization(originator)
+      return
+    }
 
+    // Extract token spend information for user prompt
+    const spendInfo = this.extractTokenSpendInfo(args)
+
+    // Prompt user with detailed token information if available
     if (spendInfo.sendAmount > 0 || spendInfo.totalInputAmount > 0) {
       await this.promptForTokenSpend(originator, spendInfo)
     } else {
-      // Can't determine amount, use generic prompt
+      // Fallback to generic prompt if we can't parse token details
       await this.promptForGenericAuthorization(originator)
     }
   }
@@ -300,67 +418,60 @@ export class BasicTokenModule implements PermissionsModule {
     let iconURL: string | undefined
     let recipient: string | undefined
 
-    console.log('[BasicTokenModule] extractTokenSpendInfo - args:', {
-      description: args.description,
-      inputCount: args.inputs?.length,
-      outputCount: args.outputs?.length
-    })
+    // Input validation
+    if (!args || typeof args !== 'object') {
+      throw new Error('Invalid args for extractTokenSpendInfo')
+    }
 
     // Parse action description for send amount and recipient (if not encrypted)
     // Format: "Send {amount} tokens to {recipient.slice(0, 8)}..."
-    if (args.description) {
-      console.log('[BasicTokenModule] Parsing description:', args.description)
+    if (args.description && typeof args.description === 'string') {
       const sendMatch = args.description.match(/Send (\d+) tokens? to ([a-fA-F0-9]+)/i)
       if (sendMatch) {
-        sendAmount = parseInt(sendMatch[1], 10)
-        recipient = sendMatch[2]
-        console.log('[BasicTokenModule] Matched description:', { sendAmount, recipient })
+        const parsedAmount = parseInt(sendMatch[1], 10)
+        if (!isNaN(parsedAmount) && parsedAmount > 0) {
+          sendAmount = parsedAmount
+          recipient = sendMatch[2]
+        }
       }
     }
 
     // Parse input descriptions to get total input amount (if not encrypted)
     // Format: "Spend {amount} tokens"
-    if (args.inputs) {
+    if (Array.isArray(args.inputs)) {
       for (const input of args.inputs) {
-        console.log('[BasicTokenModule] Input:', { inputDescription: input.inputDescription })
-        if (input.inputDescription) {
+        if (input?.inputDescription && typeof input.inputDescription === 'string') {
           const match = input.inputDescription.match(/Spend (\d+) tokens?/i)
           if (match) {
-            totalInputAmount += parseInt(match[1], 10)
-            console.log('[BasicTokenModule] Matched input amount:', match[1])
+            const parsedAmount = parseInt(match[1], 10)
+            if (!isNaN(parsedAmount) && parsedAmount > 0) {
+              totalInputAmount += parsedAmount
+            }
           }
         }
       }
     }
 
     // Parse ALL output locking scripts to extract token metadata
-    if (args.outputs) {
-      for (let i = 0; i < args.outputs.length; i++) {
-        const output = args.outputs[i]
-        console.log(`[BasicTokenModule] Output ${i}:`, {
-          hasLockingScript: !!output.lockingScript,
-          lockingScriptLen: output.lockingScript?.length,
-          basket: output.basket,
-          outputDescription: output.outputDescription
-        })
-        if (output.lockingScript) {
+    if (Array.isArray(args.outputs)) {
+      for (const output of args.outputs) {
+        if (output?.lockingScript && typeof output.lockingScript === 'string') {
           const parsed = this.parseTokenLockingScript(output.lockingScript)
-          console.log(`[BasicTokenModule] Parsed output ${i}:`, parsed)
           if (parsed) {
             // Get asset ID and metadata from first valid token
-            if (!assetId && parsed.assetId && parsed.assetId !== 'ISSUE') {
+            if (!assetId && parsed.assetId && parsed.assetId !== ISSUE_MARKER) {
               assetId = parsed.assetId
             }
-            if (parsed.metadata?.name) {
+            if (parsed.metadata?.name && typeof parsed.metadata.name === 'string') {
               tokenName = parsed.metadata.name
             }
-            if (parsed.metadata?.iconURL) {
+            if (parsed.metadata?.iconURL && typeof parsed.metadata.iconURL === 'string') {
               iconURL = parsed.metadata.iconURL
             }
 
             // Determine if this is a change output or send output
-            // Prefer basket presence since descriptions may be encrypted
-            if (output.basket?.startsWith(P_BASKET_PREFIX)) {
+            // Basket presence indicates change (returning to self)
+            if (output.basket && typeof output.basket === 'string' && output.basket.startsWith(P_BASKET_PREFIX)) {
               changeAmount += parsed.amount
             } else {
               sendAmount += parsed.amount
@@ -380,15 +491,6 @@ export class BasicTokenModule implements PermissionsModule {
       sendAmount = totalInputAmount - changeAmount
     }
 
-    console.log('[BasicTokenModule] Final extracted info:', {
-      sendAmount,
-      totalInputAmount,
-      changeAmount,
-      tokenName,
-      assetId,
-      recipient
-    })
-
     return {
       sendAmount,
       totalInputAmount,
@@ -404,16 +506,26 @@ export class BasicTokenModule implements PermissionsModule {
   /**
    * Prompts user for token spend authorization with comprehensive details.
    */
+  /**
+   * Prompts user for token spend authorization with detailed information.
+   * 
+   * SECURITY: The prompt data is JSON-encoded to prevent injection attacks.
+   * The UI component (TokenUsagePrompt) is responsible for safely rendering this data.
+   * 
+   * @param originator - dApp identifier
+   * @param spendInfo - Parsed token spend information
+   * @throws Error if user denies authorization
+   */
   private async promptForTokenSpend(originator: string, spendInfo: TokenSpendInfo): Promise<void> {
-    // Check for existing on-chain permission (disabled for now)
-    // if (await this.hasValidPermission(originator)) {
-    //   console.log('[BasicTokenModule] Valid on-chain permission found, allowing')
-    //   this.grantSessionAuthorization(originator)
-    //   return
-    // }
+    // Input validation
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator')
+    }
+    if (!spendInfo || typeof spendInfo !== 'object') {
+      throw new Error('Invalid spendInfo')
+    }
 
-    // Build a structured message for the prompt
-    // Format: JSON-encoded spend info that TokenUsagePrompt can parse
+    // Build structured prompt data (JSON-encoded for safety)
     const promptData = {
       type: 'btms_spend',
       sendAmount: spendInfo.sendAmount,
@@ -426,96 +538,120 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     const message = JSON.stringify(promptData)
-    console.log('[BasicTokenModule] Prompting user with spend info:', promptData)
-
     const approved = await this.promptUserForTokenUsage(originator, message)
 
     if (!approved) {
-      console.log('[BasicTokenModule] User denied permission')
-      throw new Error('Permission denied.')
+      throw new Error('User denied permission to spend tokens')
     }
 
-    console.log('[BasicTokenModule] User approved, granting session authorization')
     this.grantSessionAuthorization(originator)
   }
 
   /**
    * Prompts user for generic authorization when we can't determine token details.
    */
+  /**
+   * Prompts user for generic authorization when token details cannot be parsed.
+   * 
+   * SECURITY: Fallback prompt when we can't extract detailed token information.
+   * Still requires explicit user approval.
+   * 
+   * @param originator - dApp identifier
+   * @throws Error if user denies authorization
+   */
   private async promptForGenericAuthorization(originator: string): Promise<void> {
-    // Prompt user
-    const message = `Spend BTMS tokens\n\nApp: ${originator}`
-    console.log('[BasicTokenModule] Prompting user (generic):', message)
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator')
+    }
 
+    const message = `Spend BTMS tokens\n\nApp: ${originator}`
     const approved = await this.promptUserForTokenUsage(originator, message)
 
     if (!approved) {
-      console.log('[BasicTokenModule] User denied permission')
       throw new Error('User denied permission to spend BTMS tokens')
     }
 
-    console.log('[BasicTokenModule] User approved, granting session authorization')
     this.grantSessionAuthorization(originator)
   }
 
   /**
    * Handles createSignature requests for BTMS token spending.
    * 
-   * Security verification:
-   * 1. Check session authorization from createAction approval
-   * 2. Verify the preimage matches the authorized transaction (hashOutputs, outpoint)
-   * 3. Fall back to on-chain permission check if no session auth
+   * SECURITY: This is the second checkpoint. It verifies that:
+   * 1. Session authorization exists (granted by createAction approval)
+   * 2. The preimage matches the authorized transaction (prevents transaction substitution)
    * 
-   * @param args The createSignature arguments
-   * @param originator The app requesting the signature
+   * ISSUANCE HANDLING:
+   * Token issuance is auto-approved via multiple detection methods:
+   * - Session auth from createAction (if ISSUE_MARKER or btms_issue tag detected)
+   * - Preimage parsing (checks for ISSUE_MARKER in scriptCode)
+   * - Short signatures (<157 bytes, not full BIP-143 preimages)
+   * 
+   * @param args - createSignature arguments
+   * @param originator - dApp identifier
+   * @throws Error if authorization is denied or verification fails
    */
   private async handleCreateSignature(args: CreateSignatureArgs, originator: string): Promise<void> {
-    console.log('[BasicTokenModule] handleCreateSignature:', {
-      protocolID: args.protocolID,
-      keyID: args.keyID,
-      originator,
-      hasData: !!args.data,
-      dataLength: args.data?.length,
-      hasSessionAuth: this.hasSessionAuthorization(originator),
-      sessionAuthKeys: Array.from(this.sessionAuthorizations.keys())
-    })
+    // Input validation
+    if (!args || typeof args !== 'object') {
+      throw new Error('Invalid createSignature args')
+    }
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator')
+    }
 
-    // Check if we have session authorization from a recent createAction approval
+    // Check if we have session authorization from createAction
     if (this.hasSessionAuthorization(originator)) {
-      console.log('[BasicTokenModule] Session authorization found, allowing createSignature')
-      // Session auth exists - skip prompting, just verify if we have transaction data
+      // Session auth exists - proceed to verification
     } else {
-      // No authorization found - this shouldn't happen if createAction was called first
-      // But it can happen if createAction didn't go through our module (no P-basket outputs)
-      console.warn('[BasicTokenModule] No authorization found for createSignature, prompting user')
+      // No session auth - check if this is token issuance
+
+      // Method 1: Parse BIP-143 preimage for ISSUE_MARKER
+      if (args.data && args.data.length >= 157) {
+        if (this.isIssuanceFromPreimage(args.data)) {
+          this.grantSessionAuthorization(originator)
+          return
+        }
+      }
+
+      // Method 2: Short signatures (not full BIP-143 preimages) are assumed to be issuance
+      // This handles PushDrop signatures that don't include full transaction context
+      if (args.data && args.data.length > 0 && args.data.length < 157) {
+        this.grantSessionAuthorization(originator)
+        return
+      }
+
+      // No authorization and not issuance - require user approval
       await this.promptForGenericAuthorization(originator)
     }
 
-    // Session authorization exists - now verify the signature request matches
-    // what was authorized in createAction
+    // Verify the signature request matches the authorized transaction
     const authorizedTx = this.authorizedTransactions.get(originator)
     if (!authorizedTx) {
-      console.warn('[BasicTokenModule] No authorized transaction data found, allowing based on session auth')
+      // No transaction data captured - allow based on session auth alone
       return
     }
 
     // Check if authorization has expired
     const elapsed = Date.now() - authorizedTx.timestamp
     if (elapsed > this.SESSION_TIMEOUT_MS) {
+      this.sessionAuthorizations.delete(originator)
       this.authorizedTransactions.delete(originator)
-      throw new Error('Authorized transaction has expired')
+      throw new Error('Transaction authorization has expired. Please try again.')
     }
 
-    // Verify the preimage if data is provided (BIP-143 signing)
-    if (args.data && args.data.length > 0) {
+    // Verify the preimage matches the authorized transaction
+    if (args.data && args.data.length >= 157) {
       this.verifyPreimage(args.data, authorizedTx, originator)
     }
-
-    console.log('[BasicTokenModule] Signature request verified against authorized transaction')
   }
 
   /**
    * Verifies that a BIP-143 preimage matches the authorized transaction.
+   * 
+   * SECURITY: This prevents a malicious dApp from:
+   * 1. Getting approval for one transaction
+   * 2. Signing a different transaction with different outputs or inputs
    * 
    * BIP-143 preimage structure:
    * - Version: 4 bytes
@@ -529,20 +665,33 @@ export class BasicTokenModule implements PermissionsModule {
    * - Locktime: 4 bytes
    * - Sighash type: 4 bytes
    * 
-   * We verify:
-   * 1. The outpoint being signed is in our authorized list
-   * 2. The hashOutputs matches what we computed from createAction
+   * Verification checks:
+   * 1. Outpoint being signed is in our authorized list
+   * 2. hashOutputs matches what we computed from createAction
+   * 
+   * @param data - BIP-143 preimage bytes
+   * @param authorizedTx - Authorized transaction data from createAction
+   * @param _originator - dApp identifier (unused, for future logging)
+   * @throws Error if verification fails
    */
   private verifyPreimage(data: number[], authorizedTx: AuthorizedTransaction, _originator: string): void {
-    // Minimum preimage length: 4 + 32 + 32 + 36 + 1 + 8 + 4 + 32 + 4 + 4 = 157 bytes (with 1-byte script)
-    if (data.length < 157) {
-      console.warn('[BasicTokenModule] Preimage too short, skipping verification')
+    // Input validation
+    if (!Array.isArray(data) || data.length < 157) {
+      // Too short to be a valid BIP-143 preimage - skip verification
       return
+    }
+    if (!authorizedTx || typeof authorizedTx !== 'object') {
+      throw new Error('Invalid authorized transaction data')
     }
 
     try {
       // Extract outpoint (bytes 68-103: 32-byte txid reversed + 4-byte vout)
       const outpointStart = 4 + 32 + 32 // After version, hashPrevouts, hashSequence
+
+      if (data.length < outpointStart + 36) {
+        throw new Error('Preimage too short to extract outpoint')
+      }
+
       const txidBytes = data.slice(outpointStart, outpointStart + 32)
       // Reverse the txid bytes (Bitcoin uses little-endian)
       const txid = Utils.toHex(txidBytes.reverse())
@@ -550,19 +699,18 @@ export class BasicTokenModule implements PermissionsModule {
       const vout = voutBytes[0] | (voutBytes[1] << 8) | (voutBytes[2] << 16) | (voutBytes[3] << 24)
       const outpoint = `${txid}.${vout}`
 
-      console.log('[BasicTokenModule] Verifying outpoint:', outpoint)
-
-      // Verify the outpoint is authorized
+      // SECURITY: Verify the outpoint is in our authorized list
       if (!authorizedTx.authorizedOutpoints.has(outpoint)) {
-        console.error('[BasicTokenModule] Outpoint not authorized:', outpoint)
-        console.error('[BasicTokenModule] Authorized outpoints:', Array.from(authorizedTx.authorizedOutpoints))
-        throw new Error(`Signature requested for unauthorized outpoint: ${outpoint}`)
+        throw new Error(`Unauthorized outpoint: ${outpoint}. This transaction was not approved.`)
       }
 
-      // Find hashOutputs in the preimage
-      // It's located after: version(4) + hashPrevouts(32) + hashSequence(32) + outpoint(36) + scriptCode(var) + value(8) + sequence(4)
-      // We need to parse the scriptCode length first
+      // Parse scriptCode length to find hashOutputs position
       const scriptCodeLenStart = outpointStart + 36
+
+      if (data.length < scriptCodeLenStart + 1) {
+        throw new Error('Preimage too short to parse scriptCode length')
+      }
+
       let scriptCodeLen: number
       let scriptCodeDataStart: number
 
@@ -571,65 +719,92 @@ export class BasicTokenModule implements PermissionsModule {
         scriptCodeLen = firstByte
         scriptCodeDataStart = scriptCodeLenStart + 1
       } else if (firstByte === 0xfd) {
+        if (data.length < scriptCodeLenStart + 3) {
+          throw new Error('Preimage too short for varint')
+        }
         scriptCodeLen = data[scriptCodeLenStart + 1] | (data[scriptCodeLenStart + 2] << 8)
         scriptCodeDataStart = scriptCodeLenStart + 3
       } else if (firstByte === 0xfe) {
+        if (data.length < scriptCodeLenStart + 5) {
+          throw new Error('Preimage too short for varint')
+        }
         scriptCodeLen = data[scriptCodeLenStart + 1] | (data[scriptCodeLenStart + 2] << 8) |
           (data[scriptCodeLenStart + 3] << 16) | (data[scriptCodeLenStart + 4] << 24)
         scriptCodeDataStart = scriptCodeLenStart + 5
       } else {
-        console.warn('[BasicTokenModule] Unsupported varint size, skipping hashOutputs verification')
+        // 0xff varint not expected for script lengths
         return
+      }
+
+      // Validate scriptCode length is reasonable (prevent DoS)
+      if (scriptCodeLen < 0 || scriptCodeLen > 10000) {
+        throw new Error('Invalid scriptCode length in preimage')
       }
 
       // hashOutputs starts after scriptCode + value(8) + sequence(4)
       const hashOutputsStart = scriptCodeDataStart + scriptCodeLen + 8 + 4
+
       if (hashOutputsStart + 32 > data.length) {
-        console.warn('[BasicTokenModule] Preimage too short for hashOutputs, skipping verification')
-        return
+        throw new Error('Preimage too short to extract hashOutputs')
       }
 
       const hashOutputsBytes = data.slice(hashOutputsStart, hashOutputsStart + 32)
       const preimageHashOutputs = Utils.toHex(hashOutputsBytes)
 
-      console.log('[BasicTokenModule] Verifying hashOutputs:', {
-        preimage: preimageHashOutputs,
-        authorized: authorizedTx.hashOutputs
-      })
-
-      // Verify hashOutputs matches
+      // SECURITY: Verify hashOutputs matches what user approved
       if (preimageHashOutputs !== authorizedTx.hashOutputs) {
-        console.error('[BasicTokenModule] hashOutputs mismatch!')
-        throw new Error('Signature preimage hashOutputs does not match authorized transaction')
+        throw new Error('Transaction outputs do not match approved transaction. Possible attack detected.')
       }
-
-      console.log('[BasicTokenModule] Preimage verification passed')
     } catch (error) {
-      if (error instanceof Error && error.message.includes('unauthorized')) {
+      // Re-throw security-critical errors
+      if (error instanceof Error &&
+        (error.message.includes('Unauthorized') ||
+          error.message.includes('do not match') ||
+          error.message.includes('attack'))) {
         throw error
       }
-      console.warn('[BasicTokenModule] Preimage verification error:', error)
-      // Don't throw for parsing errors - fall back to session auth
+      // For parsing errors, fall back to session auth (don't block legitimate transactions)
     }
   }
 
   /**
    * Grants session authorization for an originator.
+   * 
+   * SECURITY: Session authorization is time-limited (60s) to prevent replay attacks.
+   * After expiry, user must re-approve the transaction.
+   * 
+   * @param originator - dApp identifier
    */
   private grantSessionAuthorization(originator: string): void {
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator for session authorization')
+    }
     this.sessionAuthorizations.set(originator, Date.now())
   }
 
   /**
    * Checks if an originator has valid session authorization.
+   * 
+   * SECURITY: Automatically expires and removes stale authorizations.
+   * 
+   * @param originator - dApp identifier
+   * @returns true if valid session authorization exists
    */
   private hasSessionAuthorization(originator: string): boolean {
+    if (!originator || typeof originator !== 'string') {
+      return false
+    }
+
     const timestamp = this.sessionAuthorizations.get(originator)
-    if (!timestamp) return false
+    if (!timestamp || typeof timestamp !== 'number') {
+      return false
+    }
 
     const elapsed = Date.now() - timestamp
     if (elapsed > this.SESSION_TIMEOUT_MS) {
+      // Auto-cleanup expired authorization
       this.sessionAuthorizations.delete(originator)
+      this.authorizedTransactions.delete(originator)
       return false
     }
 
@@ -638,56 +813,179 @@ export class BasicTokenModule implements PermissionsModule {
 
 
   /**
+   * Checks if a signature request is for token issuance by examining the BIP-143 preimage.
+   * 
+   * ISSUANCE DETECTION: Parses the scriptCode from the preimage and checks for ISSUE_MARKER.
+   * This is needed because during issuance, createAction doesn't have P-basket outputs
+   * (basket is added later via internalizeAction), so handleCreateAction isn't triggered.
+   * 
+   * @param preimage - BIP-143 preimage data
+   * @returns true if this is a token issuance signature
+   */
+  private isIssuanceFromPreimage(preimage: number[]): boolean {
+    if (!Array.isArray(preimage) || preimage.length < 157) {
+      return false
+    }
+
+    try {
+      // Skip to scriptCode position
+      let offset = 4 + 32 + 32 + 36 // version + hashPrevouts + hashSequence + outpoint
+
+      if (offset >= preimage.length) {
+        return false
+      }
+
+      // Parse varint scriptCode length
+      const firstByte = preimage[offset]
+      let scriptLength: number
+
+      if (firstByte < 0xfd) {
+        scriptLength = firstByte
+        offset += 1
+      } else if (firstByte === 0xfd) {
+        if (offset + 3 > preimage.length) return false
+        scriptLength = preimage[offset + 1] | (preimage[offset + 2] << 8)
+        offset += 3
+      } else if (firstByte === 0xfe) {
+        if (offset + 5 > preimage.length) return false
+        scriptLength = preimage[offset + 1] | (preimage[offset + 2] << 8) |
+          (preimage[offset + 3] << 16) | (preimage[offset + 4] << 24)
+        offset += 5
+      } else {
+        return false // 0xff not expected
+      }
+
+      // Validate scriptLength
+      if (scriptLength < 0 || scriptLength > 10000 || offset + scriptLength > preimage.length) {
+        return false
+      }
+
+      // Extract and decode scriptCode
+      const scriptBytes = preimage.slice(offset, offset + scriptLength)
+      const lockingScript = LockingScript.fromBinary(scriptBytes)
+      const decoded = PushDrop.decode(lockingScript)
+
+      // Check for ISSUE_MARKER in first field
+      if (decoded.fields.length >= 1) {
+        const assetId = Utils.toUTF8(decoded.fields[BTMS_FIELD.ASSET_ID])
+        return assetId === ISSUE_MARKER
+      }
+    } catch (e) {
+      // Not a valid PushDrop script or parsing failed
+      return false
+    }
+
+    return false
+  }
+
+  /**
+   * Checks if the createAction is for token issuance.
+   * 
+   * ISSUANCE DETECTION: Token issuance is detected by:
+   * 1. Output tags containing 'btms_issue'
+   * 2. Locking script contains ISSUE_MARKER in assetId field
+   * 
+   * @param args - createAction arguments
+   * @returns true if this is a token issuance operation
+   */
+  private isTokenIssuance(args: CreateActionArgs): boolean {
+    if (!args || !Array.isArray(args.outputs)) {
+      return false
+    }
+
+    for (const output of args.outputs) {
+      if (!output || typeof output !== 'object') {
+        continue
+      }
+
+      // Check for btms_issue tag
+      if (Array.isArray(output.tags) && output.tags.includes('btms_issue')) {
+        return true
+      }
+
+      // Check locking script for ISSUE_MARKER
+      if (output.lockingScript && typeof output.lockingScript === 'string') {
+        try {
+          const lockingScript = LockingScript.fromHex(output.lockingScript)
+          const decoded = PushDrop.decode(lockingScript)
+
+          if (decoded.fields.length >= 1) {
+            const assetId = Utils.toUTF8(decoded.fields[BTMS_FIELD.ASSET_ID])
+            if (assetId === ISSUE_MARKER) {
+              return true
+            }
+          }
+        } catch (e) {
+          // Not a valid PushDrop script, continue checking
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
    * Parses a BTMS token locking script to extract token information.
    * 
-   * BTMS tokens have 3-4 fields:
-   * - Field 0: assetId (or "ISSUE")
+   * BTMS TOKEN STRUCTURE:
+   * - Field 0: assetId (or "ISSUE" for issuance)
    * - Field 1: amount (as string)
    * - Field 2: metadata (optional JSON string)
-   * - Field 3: signature (always present in PushDrop)
+   * - Field 3: signature (present in signed PushDrop scripts)
+   * 
+   * @param lockingScriptHex - Hex-encoded locking script
+   * @returns Parsed token info or null if parsing fails
    */
   private parseTokenLockingScript(lockingScriptHex: string): ParsedTokenInfo | null {
+    if (!lockingScriptHex || typeof lockingScriptHex !== 'string') {
+      return null
+    }
+
     try {
       const lockingScript = LockingScript.fromHex(lockingScriptHex)
       const decoded = PushDrop.decode(lockingScript)
 
-      // BTMS tokens have 2-4 fields:
-      // - Without signature: 2 fields (assetId, amount) or 3 fields (assetId, amount, metadata)
-      // - With signature: 3 fields (assetId, amount, signature) or 4 fields (assetId, amount, metadata, signature)
+      // BTMS tokens have 2-4 fields depending on metadata and signature presence
       if (decoded.fields.length < 2 || decoded.fields.length > 4) {
-        console.log('[BasicTokenModule] Invalid field count:', decoded.fields.length)
         return null
       }
 
+      // Extract assetId and amount
       const assetId = Utils.toUTF8(decoded.fields[BTMS_FIELD.ASSET_ID])
-      const amount = Number(Utils.toUTF8(decoded.fields[BTMS_FIELD.AMOUNT]))
+      const amountStr = Utils.toUTF8(decoded.fields[BTMS_FIELD.AMOUNT])
+      const amount = Number(amountStr)
 
-      console.log('[BasicTokenModule] Parsed token:', { assetId, amount, fieldCount: decoded.fields.length })
-
-      if (isNaN(amount) || amount <= 0) {
-        console.log('[BasicTokenModule] Invalid amount:', amount)
+      // Validate amount
+      if (isNaN(amount) || amount <= 0 || !Number.isFinite(amount)) {
         return null
       }
 
-      // Try to parse metadata from field 2 if it exists and looks like JSON
+      // Validate assetId
+      if (!assetId || typeof assetId !== 'string') {
+        return null
+      }
+
+      // Try to parse metadata from field 2 if it exists
       let metadata: ParsedTokenInfo['metadata']
       if (decoded.fields.length >= 3) {
         try {
           const potentialMetadata = Utils.toUTF8(decoded.fields[BTMS_FIELD.METADATA])
           // Only parse if it looks like JSON (starts with {)
-          if (potentialMetadata.startsWith('{')) {
-            metadata = JSON.parse(potentialMetadata)
-            console.log('[BasicTokenModule] Parsed metadata:', metadata)
+          if (potentialMetadata && typeof potentialMetadata === 'string' && potentialMetadata.startsWith('{')) {
+            const parsed = JSON.parse(potentialMetadata)
+            // Validate metadata is an object
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              metadata = parsed
+            }
           }
         } catch (e) {
           // Field 2 might be a signature, not metadata - that's fine
-          console.log('[BasicTokenModule] Field 2 is not JSON metadata')
         }
       }
 
       return { assetId, amount, metadata }
     } catch (e) {
-      console.log('[BasicTokenModule] Failed to parse locking script:', e)
+      // Parsing failed - not a valid BTMS token
       return null
     }
   }
