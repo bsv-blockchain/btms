@@ -25,7 +25,8 @@ jest.mock('@bsv/sdk', () => {
 
 import { BTMS } from '../BTMS.js'
 import { BTMSToken } from '../BTMSToken.js'
-import { BTMS_LABEL, BTMS_BASKET_PREFIX, getAssetBasket } from '../constants.js'
+import { BTMS_LABEL, BTMS_BASKET, TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED, ISSUE_MARKER } from '../constants.js'
+import { PushDrop } from '@bsv/sdk'
 import type {
   WalletInterface,
   CreateActionArgs,
@@ -47,6 +48,7 @@ const MOCK_TXID = 'a'.repeat(64)
 const MOCK_IDENTITY_KEY = '03' + 'b'.repeat(64)
 const MOCK_RECIPIENT_KEY = '03' + 'c'.repeat(64)
 const MOCK_MONTH_LABEL = 'btms_month_2026-01'
+const MOCK_TIMESTAMP_LABEL = `btms_timestamp_${new Date('2026-01-15T00:00:00.000Z').getTime()}`
 
 // Helper to create mock atomic BEEF (simplified for testing)
 function createMockAtomicBEEF(txid: string): number[] {
@@ -308,115 +310,8 @@ describe('BTMS', () => {
   })
 
   describe('listAssets', () => {
-    it('should discover assets from listActions with btms label', async () => {
+    it('should discover assets from BTMS basket using tag filtering', async () => {
       const mockWallet = createMockWallet({
-        listActionsResult: {
-          totalActions: 2,
-          actions: [
-            {
-              txid: MOCK_TXID,
-              satoshis: 1,
-              status: 'completed' as const,
-              isOutgoing: false,
-              description: 'Issue tokens',
-              labels: [BTMS_LABEL],
-              version: 1,
-              lockTime: 0,
-              outputs: [
-                {
-                  satoshis: 1,
-                  spendable: true,
-                  outputIndex: 0,
-                  outputDescription: 'Issue GOLD tokens',
-                  basket: 'p btms GOLD',
-                  tags: ['btms_issue']
-                }
-              ]
-            },
-            {
-              txid: 'b'.repeat(64),
-              satoshis: 1,
-              status: 'completed' as const,
-              isOutgoing: false,
-              description: 'Issue more tokens',
-              labels: [BTMS_LABEL],
-              version: 1,
-              lockTime: 0,
-              outputs: [
-                {
-                  satoshis: 1,
-                  spendable: true,
-                  outputIndex: 0,
-                  outputDescription: 'Issue SILVER tokens',
-                  basket: 'p btms SILVER',
-                  tags: ['btms_issue']
-                }
-              ]
-            }
-          ]
-        },
-        listOutputsResult: {
-          totalOutputs: 0,
-          outputs: []
-        }
-      })
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const assets = await btms.listAssets()
-
-      // Should call listActions with btms label
-      expect(mockWallet.calls.listActions.length).toBeGreaterThan(0)
-      const listActionsCall = mockWallet.calls.listActions[0] as ListActionsArgs
-      expect(listActionsCall.labels).toContain(BTMS_LABEL)
-    })
-
-    it('should filter by basket prefix (p btms)', async () => {
-      const mockWallet = createMockWallet({
-        listActionsResult: {
-          totalActions: 2,
-          actions: [
-            {
-              txid: MOCK_TXID,
-              satoshis: 1,
-              status: 'completed' as const,
-              isOutgoing: false,
-              description: 'BTMS token',
-              labels: [BTMS_LABEL],
-              version: 1,
-              lockTime: 0,
-              outputs: [
-                {
-                  satoshis: 1,
-                  spendable: true,
-                  outputIndex: 0,
-                  outputDescription: 'Issue GOLD tokens',
-                  basket: 'p btms GOLD',
-                  tags: ['btms_issue']
-                }
-              ]
-            },
-            {
-              txid: 'b'.repeat(64),
-              satoshis: 1,
-              status: 'completed' as const,
-              isOutgoing: false,
-              description: 'Other token',
-              labels: ['other'],
-              version: 1,
-              lockTime: 0,
-              outputs: [
-                {
-                  satoshis: 1,
-                  spendable: true,
-                  outputIndex: 0,
-                  outputDescription: 'Other token output',
-                  basket: 'other-basket',
-                  tags: ['other']
-                }
-              ]
-            }
-          ]
-        },
         listOutputsResult: {
           totalOutputs: 0,
           outputs: []
@@ -426,9 +321,29 @@ describe('BTMS', () => {
 
       await btms.listAssets()
 
-      // Verify listActions was called with correct parameters
-      const listActionsCall = mockWallet.calls.listActions[0] as ListActionsArgs
-      expect(listActionsCall.includeOutputs).toBe(true)
+      // Should call listOutputs with BTMS basket and tag filtering
+      expect(mockWallet.calls.listOutputs.length).toBeGreaterThan(0)
+      const listOutputsCall = mockWallet.calls.listOutputs[0] as ListOutputsArgs
+      expect(listOutputsCall.basket).toBe(BTMS_BASKET)
+      expect(listOutputsCall.tags).toEqual([TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED])
+      expect(listOutputsCall.tagQueryMode).toBe('any')
+    })
+
+    it('should use single BTMS basket for all assets', async () => {
+      const mockWallet = createMockWallet({
+        listOutputsResult: {
+          totalOutputs: 0,
+          outputs: []
+        }
+      })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      await btms.listAssets()
+
+      // Verify listOutputs was called with single BTMS basket
+      const listOutputsCall = mockWallet.calls.listOutputs[0] as ListOutputsArgs
+      expect(listOutputsCall.basket).toBe(BTMS_BASKET)
+      expect(listOutputsCall.basket).toBe('p btms')
     })
   })
 
@@ -445,10 +360,12 @@ describe('BTMS', () => {
 
       await btms.getSpendableTokens(assetId)
 
-      // Should query the basket for this asset
+      // Should query the BTMS basket with tag filtering
       expect(mockWallet.calls.listOutputs.length).toBe(1)
       const listOutputsCall = mockWallet.calls.listOutputs[0] as ListOutputsArgs
-      expect(listOutputsCall.basket).toBe(getAssetBasket(assetId))
+      expect(listOutputsCall.basket).toBe(BTMS_BASKET)
+      expect(listOutputsCall.tags).toEqual([TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED])
+      expect(listOutputsCall.tagQueryMode).toBe('any')
       expect(listOutputsCall.include).toBe('locking scripts')
       expect(listOutputsCall.includeTags).toBe(true)
     })
@@ -738,6 +655,7 @@ describe('BTMS', () => {
         BTMS_LABEL,
         'btms_type_issue',
         'btms_direction_incoming',
+        MOCK_TIMESTAMP_LABEL,
         MOCK_MONTH_LABEL,
         `btms_counterparty_${MOCK_IDENTITY_KEY}`
       ])
@@ -747,6 +665,7 @@ describe('BTMS', () => {
         BTMS_LABEL,
         'btms_type_issue',
         'btms_direction_incoming',
+        MOCK_TIMESTAMP_LABEL,
         MOCK_MONTH_LABEL,
         `btms_assetId_${MOCK_TXID}.0`,
         `btms_counterparty_${MOCK_IDENTITY_KEY}`
@@ -828,6 +747,7 @@ describe('BTMS', () => {
           BTMS_LABEL,
           'btms_type_send',
           'btms_direction_outgoing',
+          MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
           `btms_assetId_${assetId}`,
           `btms_counterparty_${MOCK_RECIPIENT_KEY}`
@@ -894,6 +814,7 @@ describe('BTMS', () => {
           BTMS_LABEL,
           'btms_type_melt',
           'btms_direction_incoming',
+          MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
           `btms_assetId_${assetId}`,
           `btms_counterparty_${MOCK_IDENTITY_KEY}`
@@ -934,11 +855,9 @@ describe('BTMS', () => {
   })
 })
 
-describe('getAssetBasket helper', () => {
-  it('should generate correct basket name', () => {
-    expect(getAssetBasket('GOLD')).toBe('p btms GOLD')
-    expect(getAssetBasket('SILVER')).toBe('p btms SILVER')
-    expect(getAssetBasket(MOCK_TXID + '.0')).toBe(`p btms ${MOCK_TXID}.0`)
+describe('BTMS_BASKET constant', () => {
+  it('should be the single basket for all assets', () => {
+    expect(BTMS_BASKET).toBe('p btms')
   })
 })
 
@@ -1410,6 +1329,7 @@ describe('Ownership Proof', () => {
           BTMS_LABEL,
           'btms_type_receive',
           'btms_direction_incoming',
+          MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
           `btms_assetId_${MOCK_TXID}.0`,
           `btms_counterparty_${MOCK_RECIPIENT_KEY}`

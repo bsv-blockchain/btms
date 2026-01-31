@@ -47,27 +47,19 @@ export const BTMS_KEY_ID = '1'
 // ---------------------------------------------------------------------------
 
 /**
- * Basket prefix for BTMS tokens
+ * Basket name for all BTMS tokens
  * 
- * Token baskets follow the pattern: "p btms {assetId}"
- * The "p" prefix indicates permission-based basket access for the BTMS permission module.
+ * All BTMS token outputs are stored in a single basket: "p btms"
+ * Individual assets are differentiated by:
+ * - Tags: btms_issue, btms_change, btms_received, btms_send
+ * - Token script content (assetId encoded in the token)
  * 
- * Example: "p btms abc123def456789...0"
+ * This architecture allows efficient querying:
+ * - Single listOutputs call to get all BTMS tokens
+ * - Filter by tags to get owned tokens (issue/change/received)
+ * - Decode scripts to discover unique assets
  */
-export const BTMS_BASKET_PREFIX = 'p btms'
-
-/**
- * Generate a basket name for a specific asset.
- * 
- * Uses the "p btms <assetId>" format for permission-based basket access.
- * This allows the BTMS permission module to control access to these tokens.
- * 
- * @param assetId - The canonical asset ID (txid.outputIndex format)
- * @returns Basket name in "p btms <assetId>" format
- */
-export function getAssetBasket(assetId: string): BasketStringUnder300Bytes {
-  return `${BTMS_BASKET_PREFIX} ${assetId}` as BasketStringUnder300Bytes
-}
+export const BTMS_BASKET = 'p btms' as BasketStringUnder300Bytes
 
 // ---------------------------------------------------------------------------
 // Label Constants
@@ -75,6 +67,22 @@ export function getAssetBasket(assetId: string): BasketStringUnder300Bytes {
 
 /** Label for BTMS transactions (for discovery via listActions) */
 export const BTMS_LABEL = 'btms'
+
+// ---------------------------------------------------------------------------
+// Output Tag Constants
+// ---------------------------------------------------------------------------
+
+/** Tag for issued token outputs (owned by issuer) */
+export const TAG_ISSUE = 'btms_issue'
+
+/** Tag for change outputs from send/melt operations (owned) */
+export const TAG_CHANGE = 'btms_change'
+
+/** Tag for received token outputs (owned by recipient) */
+export const TAG_RECEIVED = 'btms_received'
+
+/** Tag for sent token outputs (not owned, sent to recipient) */
+export const TAG_SEND = 'btms_send'
 
 // ---------------------------------------------------------------------------
 // Validation Constants

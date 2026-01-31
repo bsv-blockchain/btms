@@ -40,7 +40,7 @@
 export { BTMS } from './BTMS.js'
 
 // Advanced extension class
-export { BTMSAdvanced } from './BTMSAdvanced.js'
+// export { BTMSAdvanced } from './BTMSAdvanced.js'
 
 // Token encoding/decoding
 export { BTMSToken } from './BTMSToken.js'
@@ -100,7 +100,11 @@ export type {
   ProvenToken,
   OwnershipProof,
   ProveOwnershipResult,
-  VerifyOwnershipResult
+  VerifyOwnershipResult,
+
+  // Transaction history types
+  BTMSTransaction,
+  GetTransactionsResult
 } from './types.js'
 
 // Constants
@@ -110,13 +114,16 @@ export {
   BTMS_PROTOCOL_ID,
   BTMS_KEY_ID,
   BTMS_LABEL,
-  BTMS_BASKET_PREFIX,
+  BTMS_BASKET,
   DEFAULT_TOKEN_SATOSHIS,
   ISSUE_MARKER,
   MIN_TOKEN_AMOUNT,
   MAX_TOKEN_AMOUNT,
   MAX_METADATA_LENGTH,
-  getAssetBasket
+  TAG_ISSUE,
+  TAG_CHANGE,
+  TAG_RECEIVED,
+  TAG_SEND
 } from './constants.js'
 
 // Utilities

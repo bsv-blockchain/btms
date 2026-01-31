@@ -2,6 +2,10 @@
  * Utility functions for BTMS
  */
 
+import { HexString, TXIDHexString, OutpointString } from '@bsv/sdk'
+import { BTMSToken } from './BTMSToken.js'
+import { DEFAULT_TOKEN_SATOSHIS, ISSUE_MARKER } from './constants.js'
+
 /**
  * Parsed custom instructions containing key derivation info
  */
@@ -44,3 +48,55 @@ export function parseCustomInstructions(
   }
 }
 
+/**
+ * Decode and extract token amount from an output locking script.
+ * Handles ISSUE_MARKER conversion to canonical assetId.
+ * 
+ * @param output - Output with locking script, satoshis, and index
+ * @param txid - Transaction ID for computing asset ID from ISSUE_MARKER
+ * @param assetId - Expected asset ID to match against
+ * @returns Token amount if valid and matches assetId, null otherwise
+ */
+export function decodeOutputAmount(
+  output: { lockingScript?: HexString; satoshis: number; outputIndex: number },
+  txid: TXIDHexString,
+  assetId: string
+): number | null {
+  if (!output.lockingScript || output.satoshis !== DEFAULT_TOKEN_SATOSHIS) return null
+  const decoded = BTMSToken.decode(output.lockingScript)
+  if (!decoded.valid) return null
+
+  let outputAssetId = decoded.assetId
+  if (decoded.assetId === ISSUE_MARKER) {
+    outputAssetId = BTMSToken.computeAssetId(txid, output.outputIndex)
+  }
+
+  if (outputAssetId !== assetId) return null
+  return decoded.amount
+}
+
+/**
+ * Decode and extract token amount from an input source locking script.
+ * Handles ISSUE_MARKER conversion using source outpoint.
+ * 
+ * @param input - Input with source locking script and outpoint
+ * @param assetId - Expected asset ID to match against
+ * @returns Token amount if valid and matches assetId, null otherwise
+ */
+export function decodeInputAmount(
+  input: { sourceLockingScript?: HexString; sourceOutpoint: OutpointString },
+  assetId: string
+): number | null {
+  if (!input.sourceLockingScript) return null
+  const decoded = BTMSToken.decode(input.sourceLockingScript)
+  if (!decoded.valid) return null
+
+  let inputAssetId = decoded.assetId
+  if (decoded.assetId === ISSUE_MARKER) {
+    const [sourceTxid, sourceIndex] = input.sourceOutpoint.split('.')
+    inputAssetId = BTMSToken.computeAssetId(sourceTxid as TXIDHexString, Number(sourceIndex))
+  }
+
+  if (inputAssetId !== assetId) return null
+  return decoded.amount
+}

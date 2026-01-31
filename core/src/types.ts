@@ -91,6 +91,40 @@ export interface BTMSAsset {
 }
 
 /**
+ * Transaction history entry
+ */
+export interface BTMSTransaction {
+  /** Transaction ID */
+  txid: TXIDHexString
+  /** Transaction type */
+  type: 'issue' | 'send' | 'receive' | 'melt'
+  /** Transaction direction from user's perspective */
+  direction: 'incoming' | 'outgoing'
+  /** Token amount involved */
+  amount: number
+  /** Asset ID */
+  assetId: string
+  /** Counterparty public key (if applicable) */
+  counterparty?: PubKeyHex
+  /** Transaction timestamp (if available) */
+  timestamp?: number
+  /** Transaction description */
+  description?: string
+  /** Transaction status */
+  status: 'completed' | 'pending' | 'failed'
+}
+
+/**
+ * Result of getTransactions query
+ */
+export interface GetTransactionsResult {
+  /** List of transactions */
+  transactions: BTMSTransaction[]
+  /** Total number of transactions (for pagination) */
+  total: number
+}
+
+/**
  * Asset metadata structure
  */
 export interface BTMSAssetMetadata {
