@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react'
 import { Typography, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField, CircularProgress, Box } from '@mui/material'
 import { toast } from 'react-toastify'
 import useStyles from './send-style'
+import { IdentitySearchField } from '@bsv/identity-react'
 
 import { Asset, btms } from '../../btms/index'
 import { SatoshiValue } from '@bsv/sdk'
@@ -36,7 +37,7 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
 
   const quantityValid = quantity.trim() !== '' && Number.isFinite(qty) && qty > 0 && qty <= asset.balance
 
-  const recipientValid = recipient.trim() !== '' && recipient.length >= 66
+  const recipientValid = recipient.trim() !== '' && recipient.length >= 64
 
   // Disable send button when:
   //  1. balance is 0
@@ -78,14 +79,35 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       setOpen(false)
     } catch (err: any) {
       console.error(err)
-      const message = err?.message || ''
-      if (message.includes('Permission denied')) {
-        toast('Permission request cancelled', {
-          autoClose: 4000,
-        })
-        return
+      const rawMessage = err?.message || ''
+
+      // Parse user-friendly error messages
+      let userMessage = 'Something went wrong!'
+
+      if (rawMessage.includes('User denied')) {
+        userMessage = 'Transaction cancelled by user'
+      } else if (rawMessage.includes('Permission denied') || rawMessage.includes('permission')) {
+        userMessage = 'Permission request cancelled'
+      } else if (rawMessage.includes('Insufficient') || rawMessage.includes('insufficient')) {
+        userMessage = 'Insufficient balance for this transaction'
+      } else if (rawMessage.includes('network') || rawMessage.includes('Network')) {
+        userMessage = 'Network error. Please check your connection and try again.'
+      } else if (rawMessage.includes('timeout') || rawMessage.includes('Timeout')) {
+        userMessage = 'Request timed out. Please try again.'
+      } else if (rawMessage.includes('invalid') || rawMessage.includes('Invalid')) {
+        userMessage = 'Invalid transaction details. Please check and try again.'
+      } else {
+        // Try to extract just the message part if it's a JSON-like error
+        const messageMatch = rawMessage.match(/"message"\s*:\s*"([^"]+)"/)
+        if (messageMatch && messageMatch[1]) {
+          userMessage = messageMatch[1]
+        } else if (rawMessage.length < 100 && !rawMessage.includes('{')) {
+          // Use the raw message if it's short and not JSON
+          userMessage = rawMessage
+        }
       }
-      toast.error(message || 'Something went wrong!')
+
+      toast.error(userMessage, { autoClose: 5000 })
     } finally {
       setLoading(false)
     }
@@ -94,16 +116,22 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
   return (
     <>
       {/* Disable main send button if balance = 0 */}
-      <Button onClick={() => setOpen(true)} variant="outlined" color="secondary" disabled={asset.balance === 0}>
-        Transfer
+      <Button
+        onClick={() => setOpen(true)}
+        variant="contained"
+        color="secondary"
+        disabled={asset.balance === 0}
+        sx={{ minWidth: 100, color: 'white' }}
+      >
+        Send
       </Button>
 
-      <Dialog open={open} onClose={loading ? undefined : handleSendCancel} color="primary">
+      <Dialog open={open} onClose={loading ? undefined : handleSendCancel} color="primary" maxWidth="md" fullWidth>
         <DialogTitle variant="h4" sx={{ fontWeight: 'bold' }}>
-          Transfer {asset.name}
+          Send {asset.name}
         </DialogTitle>
 
-        <DialogContent>
+        <DialogContent sx={{ minHeight: 400 }}>
           {loading && (
             <Box sx={{
               display: 'flex',
@@ -114,27 +142,37 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
               gap: 2
             }}>
               <CircularProgress color="secondary" size={48} />
-              <Typography variant="body1">Processing transfer...</Typography>
+              <Typography variant="body1">Processing send...</Typography>
               <Typography variant="body2" color="text.secondary">Recording on blockchain</Typography>
             </Box>
           )}
 
           {!loading && (
             <>
-              <Typography variant="h6">Recipient Identity Key:</Typography>
-              <Typography variant="subtitle2">Get this from the recipient</Typography>
+              <Typography variant="h6" sx={{ mb: 1 }}>Recipient:</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Search by name or paste identity key
+              </Typography>
 
-              <TextField
-                className={classes.form}
-                value={recipient}
-                variant="outlined"
-                fullWidth
-                helperText="Required"
-                onChange={e => setRecipient(e.target.value.replace(/[^0-9a-f]/gi, ''))}
-                color="secondary"
-              />
+              <Box sx={{ mb: 4, position: 'relative', zIndex: 1000, width: '100%' }}>
+                <IdentitySearchField
+                  onIdentitySelected={(identity) => {
+                    if (identity?.identityKey) {
+                      setRecipient(identity.identityKey)
+                    }
+                  }}
+                  width="300px"
+                  appName="BTMS"
+                />
+              </Box>
 
-              <Typography variant="h6" className={classes.sub_title}>
+              {recipient && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, wordBreak: 'break-all' }}>
+                  Selected: {recipient}
+                </Typography>
+              )}
+
+              <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
                 Quantity:
               </Typography>
 
@@ -163,7 +201,7 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
             onClick={handleSend}
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {loading ? 'Transferring...' : 'Confirm Transfer'}
+            {loading ? 'Sending...' : 'Send'}
           </Button>
         </DialogActions>
       </Dialog>

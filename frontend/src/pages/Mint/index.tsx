@@ -1,6 +1,6 @@
 // frontend/src/pages/Mint/index.tsx
 import React, { useState, useRef } from 'react'
-import { Container, Typography, Grid, Button, TextField, Paper, IconButton, CircularProgress, Backdrop } from '@mui/material'
+import { Container, Typography, Grid, Button, TextField, Paper, IconButton, CircularProgress, Backdrop, Box } from '@mui/material'
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto'
 import { Link } from 'react-router-dom'
@@ -157,170 +157,149 @@ const Mint: React.FC<MintProps> = ({ history }) => {
         <Typography variant="body2">This may take a moment</Typography>
       </Backdrop>
 
-      <Container
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr'
-        }}
-      >
-        <Grid container>
-          <Grid item className={classes.button}>
-            <Button component={Link} to="/" color="secondary">
-              <ArrowBackIosNewIcon className={classes.back_icon} /> My Assets
-            </Button>
-          </Grid>
+      <Container maxWidth="lg" sx={{ pb: 8 }}>
+        <Grid container alignItems="center" className={classes.button}>
+          <Button component={Link} to="/" color="secondary">
+            <ArrowBackIosNewIcon className={classes.back_icon} /> My Assets
+          </Button>
         </Grid>
 
-        <Grid
-          container
-          sx={{
-            display: 'grid',
-            gridColumn: '2'
-          }}
-        >
-          <Grid container>
-            <Grid item className={classes.title}>
-              <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+        <Paper elevation={0} sx={{ p: { xs: 3, md: 4 }, mt: 1.5 }}>
+          <Grid container spacing={4}>
+            <Grid item xs={12} md={7}>
+              <Typography variant="h4" sx={{ fontWeight: 700 }} className={classes.title}>
                 Issue New Asset
               </Typography>
-            </Grid>
-
-            <Grid item container direction="column" className={classes.sub_title}>
-              {/* Token name */}
-              <Grid item container direction="column" className={classes.form}>
-                <Grid item>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                    Asset Name
-                  </Typography>
-                </Grid>
-                <Grid item>
-                  <TextField
-                    placeholder="e.g. Gold, USD, Real Estate Fund"
-                    variant="standard"
-                    color="secondary"
-                    multiline
-                    fullWidth
-                    helperText="Required"
-                    onChange={e => setName(e.target.value)}
-                  />
-                </Grid>
-              </Grid>
-
-              {/* Image */}
-              <Grid item container direction="column" className={classes.form}>
-                <Grid item>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                    Image
-                  </Typography>
-                </Grid>
-                <Grid item container>
-                  <Paper elevation={8} className={classes.photo_container}>
-                    {photoURL ? (
-                      <Grid item className={classes.photo_preview}>
-                        <img src={photoURL} className={classes.photo_preview_img} alt="preview" />
-                      </Grid>
-                    ) : (
-                      <Grid item>
-                        <IconButton color="secondary" onClick={handlePhotoClick}>
-                          <AddAPhotoIcon />
-                          <input
-                            type="file"
-                            accept=".png, .svg, .jpeg, .jpg"
-                            style={{ display: 'none' }}
-                            ref={fileInputRef}
-                            onChange={handleFileChange}
-                          />
-                        </IconButton>
-                      </Grid>
-                    )}
-                  </Paper>
-                </Grid>
-              </Grid>
-
-              {/* Quantity */}
-              <Grid item container direction="column" className={classes.form}>
-                <Grid item>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                    Quantity
-                  </Typography>
-                </Grid>
-                <Grid item>
-                  <Typography variant="body2">Total units to issue (e.g. ounces, dollars, shares)</Typography>
-                </Grid>
-                <Grid item>
-                  <TextField
-                    placeholder="Quantity"
-                    value={quantity}
-                    variant="standard"
-                    color="secondary"
-                    fullWidth
-                    helperText="Required"
-                    onChange={e => setQuantity(e.target.value.replace(/\D/g, ''))}
-                  />
-                </Grid>
-              </Grid>
-
-              {/* Description */}
-              <Grid item container direction="column" className={classes.form}>
-                <Grid item>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                    Asset Description
-                  </Typography>
-                </Grid>
-                <Grid item>
-                  <TextField
-                    placeholder="Describe what this asset represents"
-                    multiline
-                    variant="standard"
-                    color="secondary"
-                    fullWidth
-                    helperText="Required"
-                    onChange={e => setDescription(e.target.value)}
-                  />
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-
-          {/* Preview box */}
-          <Grid container direction="column" className={classes.form}>
-            <Grid item>
-              <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                Preview
+              <Typography variant="body1" color="text.secondary">
+                Create a new tokenized asset with a clear name, description, and initial supply.
               </Typography>
-            </Grid>
-            <Grid item>
-              <Paper elevation={8}>
-                <Grid container direction="column" sx={{ padding: '2.5em' }} rowGap="0.5em">
+
+              <Grid item container direction="column" className={classes.sub_title}>
+                {/* Token name */}
+                <Grid item container direction="column" className={classes.form}>
                   <Grid item>
-                    <Typography sx={{ wordBreak: 'break-word' }}>Asset: {name}</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                      Asset Name
+                    </Typography>
                   </Grid>
                   <Grid item>
-                    <Typography sx={{ wordBreak: 'break-word' }}>Description: {description}</Typography>
-                  </Grid>
-                  <Grid item>
-                    <Typography>Quantity: {quantity}</Typography>
+                    <TextField
+                      placeholder="e.g. Gold, USD, Real Estate Fund"
+                      variant="outlined"
+                      color="secondary"
+                      multiline
+                      fullWidth
+                      helperText="Required"
+                      onChange={e => setName(e.target.value)}
+                    />
                   </Grid>
                 </Grid>
-              </Paper>
-            </Grid>
-          </Grid>
 
-          {/* Create button */}
-          <Grid container direction="column" className={classes.form}>
-            <Grid item sx={{ textAlign: 'right' }} className={classes.button}>
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={mint}
-                disabled={loading}
-                startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
-              >
-                {loading ? 'Issuing...' : 'Issue Asset'}
-              </Button>
+                {/* Image */}
+                <Grid item container direction="column" className={classes.form}>
+                  <Grid item>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                      Image
+                    </Typography>
+                  </Grid>
+                  <Grid item container>
+                    <Paper elevation={0} className={classes.photo_container}>
+                      {photoURL ? (
+                        <Grid item className={classes.photo_preview}>
+                          <img src={photoURL} className={classes.photo_preview_img} alt="preview" />
+                        </Grid>
+                      ) : (
+                        <Grid item>
+                          <IconButton color="secondary" onClick={handlePhotoClick}>
+                            <AddAPhotoIcon />
+                            <input
+                              type="file"
+                              accept=".png, .svg, .jpeg, .jpg"
+                              style={{ display: 'none' }}
+                              ref={fileInputRef}
+                              onChange={handleFileChange}
+                            />
+                          </IconButton>
+                        </Grid>
+                      )}
+                    </Paper>
+                  </Grid>
+                </Grid>
+
+                {/* Quantity */}
+                <Grid item container direction="column" className={classes.form}>
+                  <Grid item>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                      Quantity
+                    </Typography>
+                  </Grid>
+                  <Grid item>
+                    <Typography variant="body2">Total units to issue (e.g. ounces, dollars, shares)</Typography>
+                  </Grid>
+                  <Grid item>
+                    <TextField
+                      placeholder="Quantity"
+                      value={quantity}
+                      variant="outlined"
+                      color="secondary"
+                      fullWidth
+                      helperText="Required"
+                      onChange={e => setQuantity(e.target.value.replace(/\D/g, ''))}
+                    />
+                  </Grid>
+                </Grid>
+
+                {/* Description */}
+                <Grid item container direction="column" className={classes.form}>
+                  <Grid item>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                      Asset Description
+                    </Typography>
+                  </Grid>
+                  <Grid item>
+                    <TextField
+                      placeholder="Describe what this asset represents"
+                      multiline
+                      minRows={3}
+                      variant="outlined"
+                      color="secondary"
+                      fullWidth
+                      helperText="Required"
+                      onChange={e => setDescription(e.target.value)}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Grid>
+
+            <Grid item xs={12} md={5}>
+              <Box sx={{ position: 'sticky', top: 24, display: 'grid', gap: 2 }}>
+                <Typography variant="overline" color="text.secondary">
+                  Preview
+                </Typography>
+                <Paper elevation={0} sx={{ p: 3, background: 'rgba(255, 255, 255, 0.7)' }}>
+                  <Grid container direction="column" rowGap={1.5}>
+                    <Typography variant="subtitle2">Asset</Typography>
+                    <Typography sx={{ wordBreak: 'break-word' }}>{name || 'Untitled Asset'}</Typography>
+                    <Typography variant="subtitle2">Description</Typography>
+                    <Typography sx={{ wordBreak: 'break-word' }}>{description || 'No description yet.'}</Typography>
+                    <Typography variant="subtitle2">Quantity</Typography>
+                    <Typography>{quantity || '0'}</Typography>
+                  </Grid>
+                </Paper>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={mint}
+                  disabled={loading}
+                  startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
+                >
+                  {loading ? 'Issuing...' : 'Issue Asset'}
+                </Button>
+              </Box>
             </Grid>
           </Grid>
-        </Grid>
+        </Paper>
       </Container>
     </div>
   )

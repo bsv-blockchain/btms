@@ -180,8 +180,8 @@ const Receive: React.FC<ReceiveProps> = ({
   return (
     <>
       <Badge color="error" variant={badgeVisible ? 'dot' : 'standard'}>
-        <Button variant="outlined" color="secondary" size="small" onClick={handleOpen}>
-          Accept
+        <Button variant="outlined" color="secondary" onClick={handleOpen} sx={{ minWidth: 100 }}>
+          Receive
         </Button>
       </Badge>
 

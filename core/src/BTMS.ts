@@ -580,11 +580,14 @@ export class BTMS {
         }
       }
 
-      // Build inputs
-      const inputs = selected.map(u => ({
+      // Build inputs - note: inputDescription should reflect what's happening to the tokens
+      // The actual melt amount is amountToMelt, change goes back to user
+      const inputs = selected.map((u, i) => ({
         outpoint: u.outpoint as OutpointString,
         unlockingScriptLength: 74,
-        inputDescription: `Melt ${u.token.amount} tokens`
+        inputDescription: i === 0
+          ? `Melt ${amountToMelt} tokens (from UTXO with ${u.token.amount})`
+          : `Input ${u.token.amount} tokens for melt`
       }))
       const monthLabel = this.getMonthLabel()
       const timestampLabel = this.getTimestampLabel()
@@ -618,13 +621,48 @@ export class BTMS {
       }
 
       const spends = await this.buildSpendsForInputs(selected, signableTransaction.tx)
-      const { txid } = await this.signAndBroadcast(signableTransaction.reference, spends)
 
-      return {
-        success: true,
-        txid,
-        assetId,
-        amountMelted: amountToMelt
+      try {
+        const { txid } = await this.signAndBroadcast(signableTransaction.reference, spends)
+
+        return {
+          success: true,
+          txid,
+          assetId,
+          amountMelted: amountToMelt
+        }
+      } catch (broadcastError: any) {
+        // When burning all tokens (no outputs), overlay won't admit/retain anything
+        // This is expected behavior and should be treated as success
+        const errorMsg = broadcastError?.message || ''
+        const isBurnAll = changeAmount === 0 // No change outputs means burning everything
+        const isOverlayRejection = errorMsg.includes('No host acknowledged') ||
+          errorMsg.includes('not in admitted outputs')
+
+        if (isBurnAll && isOverlayRejection) {
+          // Sign the transaction to get the txid even though broadcast failed
+          const signResult = await this.wallet.signAction({
+            reference: signableTransaction.reference,
+            spends
+          })
+
+          if (!signResult.tx) {
+            throw new Error('Failed to sign transaction')
+          }
+
+          const finalTx = Transaction.fromAtomicBEEF(signResult.tx)
+          const txid = finalTx.id('hex') as TXIDHexString
+
+          return {
+            success: true,
+            txid,
+            assetId,
+            amountMelted: amountToMelt
+          }
+        }
+
+        // For other broadcast errors, throw them
+        throw broadcastError
       }
     } catch (error) {
       return {

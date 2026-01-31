@@ -69,8 +69,7 @@ class BTMSFrontend {
     this.core = new BTMSCore({
       wallet,
       comms,
-      networkPreset: 'local',
-      messageBox: 'btms_tokens'
+      networkPreset: 'local'
     })
   }
 
@@ -182,6 +181,32 @@ class BTMSFrontend {
   }
 
   /**
+   * Melt/burn tokens to remove them from circulation.
+   * 
+   * @param assetId - Asset ID to melt
+   * @param amount - Amount to melt (optional, defaults to entire balance)
+   */
+  async melt(
+    assetId: string,
+    amount?: number
+  ): Promise<{ txid: string; success: boolean; amountMelted: number }> {
+    const result = await this.core.melt(assetId, amount)
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to melt tokens')
+    }
+
+    // Refresh assets after melting
+    await this.listAssets()
+
+    return {
+      txid: result.txid,
+      success: true,
+      amountMelted: result.amountMelted
+    }
+  }
+
+  /**
    * List incoming token payments.
    * 
    * @param assetId - Optional filter by asset ID
@@ -246,16 +271,34 @@ class BTMSFrontend {
 
   /**
    * Get transaction history for an asset.
-   * Note: This is a placeholder - full transaction history requires additional implementation.
+   * 
+   * @param assetId - Asset ID to query
+   * @param limit - Maximum number of transactions to return
+   * @param offset - Number of transactions to skip (for pagination)
    */
   async getTransactions(
-    _assetId: string,
-    _limit: number,
-    _offset: number
-  ): Promise<{ transactions: any[] }> {
-    // Transaction history would require additional wallet queries
-    // For now, return empty array
-    return { transactions: [] }
+    assetId: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<{ transactions: any[]; total: number }> {
+    const result = await this.core.getTransactions(assetId, limit, offset)
+
+    // Transform to match frontend expected format
+    const transactions = result.transactions.map(tx => ({
+      date: tx.timestamp ? new Date(tx.timestamp).toLocaleString() : 'Unknown',
+      amount: tx.amount,
+      txid: tx.txid,
+      counterparty: tx.counterparty || 'N/A',
+      type: tx.type,
+      direction: tx.direction,
+      status: tx.status,
+      timestamp: tx.timestamp
+    }))
+
+    return {
+      transactions,
+      total: result.total
+    }
   }
 
   /**

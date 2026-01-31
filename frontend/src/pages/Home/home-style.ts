@@ -3,14 +3,15 @@ import { Theme } from '@mui/material/styles'
 
 const useStyles = makeStyles((theme: Theme) => ({
   title: {
-    paddingTop: '5.5em'
+    paddingTop: '3.5em',
+    paddingBottom: '2.5em'
   },
   sub_title: {
     paddingTop: '0.5em'
   },
   table_title: {
     paddingTop: '2.5em',
-    paddingLeft: '2.5em'
+    paddingBottom: '1em'
   },
   no_tokens: {
     paddingTop: '1.5em',

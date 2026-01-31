@@ -10,7 +10,8 @@ const useStyles = makeStyles((theme: Theme) => ({
     paddingBottom: '0.5em'
   },
   back_button: {
-    paddingTop: '1.5em'
+    paddingTop: '2em',
+    paddingBottom: '1em'
   },
   back_icon: {
     paddingRight: '0.5em'
