@@ -30,6 +30,7 @@ import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { Img } from '@bsv/uhrp-react'
 import SortIcon from '@mui/icons-material/Sort'
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import { IdentityCard } from '@bsv/identity-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts'
 import { toast } from 'react-toastify'
@@ -97,6 +98,7 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
   const [transactions, setTransactions] = useState<TokenTransaction[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [cleaningBadOutputs, setCleaningBadOutputs] = useState(false)
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -182,6 +184,35 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     } else {
       setTransactions([])
       setBalanceHistory([])
+    }
+  }
+
+  const handleCleanBadOutputs = async () => {
+    if (cleaningBadOutputs) return
+    const confirmed = window.confirm('Remove corrupted token outputs from your wallet? This cannot be undone.')
+    if (!confirmed) return
+
+    try {
+      setCleaningBadOutputs(true)
+      const result = await btms.relinquishBadOutputs()
+
+      if (result.relinquished.length === 0 && result.failed.length === 0) {
+        toast.info('No corrupted outputs found')
+      } else {
+        if (result.relinquished.length > 0) {
+          toast.success(`Removed ${result.relinquished.length} corrupted output${result.relinquished.length === 1 ? '' : 's'}`)
+        }
+        if (result.failed.length > 0) {
+          toast.error(`Failed to remove ${result.failed.length} output${result.failed.length === 1 ? '' : 's'}`)
+        }
+      }
+
+      await refresh()
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to remove corrupted outputs')
+    } finally {
+      setCleaningBadOutputs(false)
     }
   }
 
@@ -298,6 +329,18 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                 <Send assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
                 <Receive assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
                 <Melt assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  size="small"
+                  startIcon={<DeleteSweepIcon />}
+                  onClick={handleCleanBadOutputs}
+                  disabled={cleaningBadOutputs}
+                >
+                  {cleaningBadOutputs ? 'Cleaning...' : 'Remove corrupted outputs'}
+                </Button>
               </Box>
             </Grid>
 

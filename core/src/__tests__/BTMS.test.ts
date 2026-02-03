@@ -25,7 +25,11 @@ jest.mock('@bsv/sdk', () => {
 
 import { BTMS } from '../BTMS.js'
 import { BTMSToken } from '../BTMSToken.js'
-import { BTMS_LABEL, BTMS_BASKET, TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED, ISSUE_MARKER } from '../constants.js'
+import {
+  BTMS_LABEL_PREFIX,
+  BTMS_BASKET,
+  ISSUE_MARKER
+} from '../constants.js'
 import { PushDrop } from '@bsv/sdk'
 import type {
   WalletInterface,
@@ -47,8 +51,10 @@ import { PrivateKey, ProtoWallet, Transaction, TopicBroadcaster } from '@bsv/sdk
 const MOCK_TXID = 'a'.repeat(64)
 const MOCK_IDENTITY_KEY = '03' + 'b'.repeat(64)
 const MOCK_RECIPIENT_KEY = '03' + 'c'.repeat(64)
-const MOCK_MONTH_LABEL = 'btms_month_2026-01'
-const MOCK_TIMESTAMP_LABEL = `btms_timestamp_${new Date('2026-01-15T00:00:00.000Z').getTime()}`
+const MOCK_MONTH_LABEL = `${BTMS_LABEL_PREFIX}month 2026-01`
+const MOCK_TIMESTAMP_LABEL = `${BTMS_LABEL_PREFIX}timestamp ${new Date('2026-01-15T00:00:00.000Z').getTime()}`
+const MOCK_MONTH_TAG = 'btms_month_2026-01'
+const MOCK_TIMESTAMP_TAG = `btms_timestamp_${new Date('2026-01-15T00:00:00.000Z').getTime()}`
 
 // Helper to create mock atomic BEEF (simplified for testing)
 function createMockAtomicBEEF(txid: string): number[] {
@@ -268,7 +274,7 @@ describe('BTMS', () => {
       await btms.issue(500, { name: 'SILVER' })
 
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
-      expect(createActionCall.labels).toContain(BTMS_LABEL)
+      expect(createActionCall.labels).toContain(`${BTMS_LABEL_PREFIX}type issue`)
     })
 
     it('should use correct tag (btms_issue)', async () => {
@@ -278,7 +284,7 @@ describe('BTMS', () => {
       await btms.issue(100, { name: 'PLATINUM' })
 
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
-      expect(createActionCall.outputs?.[0].tags).toContain('btms_issue')
+      expect(createActionCall.outputs?.[0].tags).toContain('btms_type_issue')
     })
 
     it('should include name in description when provided', async () => {
@@ -325,7 +331,7 @@ describe('BTMS', () => {
       expect(mockWallet.calls.listOutputs.length).toBeGreaterThan(0)
       const listOutputsCall = mockWallet.calls.listOutputs[0] as ListOutputsArgs
       expect(listOutputsCall.basket).toBe(BTMS_BASKET)
-      expect(listOutputsCall.tags).toEqual([TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED])
+      expect(listOutputsCall.tags).toEqual(['btms_type_issue', 'btms_type_change', 'btms_type_receive'])
       expect(listOutputsCall.tagQueryMode).toBe('any')
     })
 
@@ -364,7 +370,7 @@ describe('BTMS', () => {
       expect(mockWallet.calls.listOutputs.length).toBe(1)
       const listOutputsCall = mockWallet.calls.listOutputs[0] as ListOutputsArgs
       expect(listOutputsCall.basket).toBe(BTMS_BASKET)
-      expect(listOutputsCall.tags).toEqual([TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED])
+      expect(listOutputsCall.tags).toEqual(['btms_type_issue', 'btms_type_change', 'btms_type_receive'])
       expect(listOutputsCall.tagQueryMode).toBe('any')
       expect(listOutputsCall.include).toBe('locking scripts')
       expect(listOutputsCall.includeTags).toBe(true)
@@ -652,35 +658,44 @@ describe('BTMS', () => {
 
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
       expect(createActionCall.labels).toEqual([
-        BTMS_LABEL,
-        'btms_type_issue',
-        'btms_direction_incoming',
+        `${BTMS_LABEL_PREFIX}type issue`,
+        `${BTMS_LABEL_PREFIX}direction incoming`,
         MOCK_TIMESTAMP_LABEL,
         MOCK_MONTH_LABEL,
-        `btms_counterparty_${MOCK_IDENTITY_KEY}`
+        `${BTMS_LABEL_PREFIX}counterparty ${MOCK_IDENTITY_KEY}`
       ])
 
       const internalizeCall = mockWallet.calls.internalizeAction[0]
       expect(internalizeCall.labels).toEqual([
-        BTMS_LABEL,
-        'btms_type_issue',
-        'btms_direction_incoming',
+        `${BTMS_LABEL_PREFIX}type issue`,
+        `${BTMS_LABEL_PREFIX}direction incoming`,
         MOCK_TIMESTAMP_LABEL,
         MOCK_MONTH_LABEL,
-        `btms_assetId_${MOCK_TXID}.0`,
-        `btms_counterparty_${MOCK_IDENTITY_KEY}`
+        `${BTMS_LABEL_PREFIX}assetId ${MOCK_TXID}.0`,
+        `${BTMS_LABEL_PREFIX}counterparty ${MOCK_IDENTITY_KEY}`
       ])
       jest.useRealTimers()
     })
 
     it('should use btms_issue tag for issuance outputs', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
+
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
       await btms.issue(100, { name: 'TEST' })
 
       const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
-      expect(createActionCall.outputs?.[0].tags).toEqual(['btms_issue'])
+      expect(createActionCall.outputs?.[0].tags).toEqual([
+        'btms_type_issue',
+        'btms_direction_incoming',
+        MOCK_TIMESTAMP_TAG,
+        MOCK_MONTH_TAG,
+        `btms_counterparty_${MOCK_IDENTITY_KEY}`
+      ])
+
+      jest.useRealTimers()
     })
 
     it('should not set basket in createAction (deferred to internalizeAction)', async () => {
@@ -744,13 +759,12 @@ describe('BTMS', () => {
 
         const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
         expect(createActionCall.labels).toEqual([
-          BTMS_LABEL,
-          'btms_type_send',
-          'btms_direction_outgoing',
+          `${BTMS_LABEL_PREFIX}type send`,
+          `${BTMS_LABEL_PREFIX}direction outgoing`,
           MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
-          `btms_assetId_${assetId}`,
-          `btms_counterparty_${MOCK_RECIPIENT_KEY}`
+          `${BTMS_LABEL_PREFIX}assetId ${assetId}`,
+          `${BTMS_LABEL_PREFIX}counterparty ${MOCK_RECIPIENT_KEY}`
         ])
       } finally {
         jest.useRealTimers()
@@ -806,18 +820,17 @@ describe('BTMS', () => {
       mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
 
       try {
-        const result = await btms.melt(assetId, 50)
+        const result = await btms.burn(assetId, 50)
         expect(result.success).toBe(true)
 
         const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
         expect(createActionCall.labels).toEqual([
-          BTMS_LABEL,
-          'btms_type_melt',
-          'btms_direction_incoming',
+          `${BTMS_LABEL_PREFIX}type melt`,
+          `${BTMS_LABEL_PREFIX}direction incoming`,
           MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
-          `btms_assetId_${assetId}`,
-          `btms_counterparty_${MOCK_IDENTITY_KEY}`
+          `${BTMS_LABEL_PREFIX}assetId ${assetId}`,
+          `${BTMS_LABEL_PREFIX}counterparty ${MOCK_IDENTITY_KEY}`
         ])
       } finally {
         jest.useRealTimers()
@@ -1326,13 +1339,12 @@ describe('Ownership Proof', () => {
         expect(mockWallet.calls.internalizeAction).toHaveLength(1)
         const internalizeCall = mockWallet.calls.internalizeAction[0]
         expect(internalizeCall.labels).toEqual([
-          BTMS_LABEL,
-          'btms_type_receive',
-          'btms_direction_incoming',
+          `${BTMS_LABEL_PREFIX}type receive`,
+          `${BTMS_LABEL_PREFIX}direction incoming`,
           MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
-          `btms_assetId_${MOCK_TXID}.0`,
-          `btms_counterparty_${MOCK_RECIPIENT_KEY}`
+          `${BTMS_LABEL_PREFIX}assetId ${MOCK_TXID}.0`,
+          `${BTMS_LABEL_PREFIX}counterparty ${MOCK_RECIPIENT_KEY}`
         ])
       } finally {
         jest.useRealTimers()
@@ -1530,7 +1542,7 @@ describe('Ownership Proof', () => {
     })
   })
 
-  describe('melt', () => {
+  describe('burn', () => {
     const MOCK_ASSET_ID = `${MOCK_TXID}.0`
 
     it('should melt entire balance when amount is not specified', async () => {
@@ -1586,7 +1598,7 @@ describe('Ownership Proof', () => {
       const btms = new BTMS({ wallet: mockWallet })
 
       try {
-        const result = await btms.melt(MOCK_ASSET_ID)
+        const result = await btms.burn(MOCK_ASSET_ID)
 
         expect(result.success).toBe(true)
         expect(result.assetId).toBe(MOCK_ASSET_ID)
@@ -1597,7 +1609,7 @@ describe('Ownership Proof', () => {
         const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
         expect(createActionCall.inputs?.length).toBe(2)
         expect(createActionCall.outputs?.length).toBe(0)
-        expect(createActionCall.description).toContain('Melt 100 tokens')
+        expect(createActionCall.description).toContain('Burn 100 tokens')
 
         expect(mockWallet.calls.signAction).toHaveLength(1)
       } finally {
@@ -1671,12 +1683,12 @@ describe('Ownership Proof', () => {
 
       try {
         // Try to melt 100 tokens when only 50 available
-        const result = await btms.melt(MOCK_ASSET_ID, 100)
+        const result = await btms.burn(MOCK_ASSET_ID, 100)
 
         expect(result.success).toBe(false)
         expect(result.error).toContain('Insufficient balance')
         expect(result.error).toContain('Have 50')
-        expect(result.error).toContain('trying to melt 100')
+        expect(result.error).toContain('trying to burn 100')
         expect(result.amountMelted).toBe(0)
       } finally {
         BTMSToken.decode = originalDecode
@@ -1696,7 +1708,7 @@ describe('Ownership Proof', () => {
 
       const btms = new BTMS({ wallet: mockWallet })
 
-      const result = await btms.melt(MOCK_ASSET_ID, 50)
+      const result = await btms.burn(MOCK_ASSET_ID, 50)
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('No spendable tokens found')
@@ -1707,7 +1719,7 @@ describe('Ownership Proof', () => {
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
-      const result = await btms.melt('invalid-asset-id', 50)
+      const result = await btms.burn('invalid-asset-id', 50)
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Invalid assetId')
@@ -1718,7 +1730,7 @@ describe('Ownership Proof', () => {
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
-      const result = await btms.melt(MOCK_ASSET_ID, -10)
+      const result = await btms.burn(MOCK_ASSET_ID, -10)
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Amount must be a positive integer')
@@ -1729,7 +1741,7 @@ describe('Ownership Proof', () => {
       const mockWallet = createMockWallet()
       const btms = new BTMS({ wallet: mockWallet })
 
-      const result = await btms.melt(MOCK_ASSET_ID, 10.5)
+      const result = await btms.burn(MOCK_ASSET_ID, 10.5)
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Amount must be a positive integer')
@@ -1782,7 +1794,7 @@ describe('Ownership Proof', () => {
       const btms = new BTMS({ wallet: mockWallet })
 
       try {
-        const result = await btms.melt(MOCK_ASSET_ID, 50)
+        const result = await btms.burn(MOCK_ASSET_ID, 50)
 
         expect(result.success).toBe(false)
         expect(result.error).toContain('Broadcast failed')
@@ -1837,7 +1849,7 @@ describe('Ownership Proof', () => {
       const btms = new BTMS({ wallet: mockWallet })
 
       try {
-        const result = await btms.melt(MOCK_ASSET_ID, 10, {
+        const result = await btms.burn(MOCK_ASSET_ID, 10, {
           changeStrategy: { strategy: 'split-equal', splitCount: 2 }
         })
 

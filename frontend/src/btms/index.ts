@@ -181,22 +181,22 @@ class BTMSFrontend {
   }
 
   /**
-   * Melt/burn tokens to remove them from circulation.
+   * Burn tokens to remove them from circulation.
    * 
-   * @param assetId - Asset ID to melt
-   * @param amount - Amount to melt (optional, defaults to entire balance)
+   * @param assetId - Asset ID to burn
+   * @param amount - Amount to burn (optional, defaults to entire balance)
    */
-  async melt(
+  async burn(
     assetId: string,
     amount?: number
   ): Promise<{ txid: string; success: boolean; amountMelted: number }> {
-    const result = await this.core.melt(assetId, amount)
+    const result = await this.core.burn(assetId, amount)
 
     if (!result.success) {
-      throw new Error(result.error || 'Failed to melt tokens')
+      throw new Error(result.error || 'Failed to burn tokens')
     }
 
-    // Refresh assets after melting
+    // Refresh assets after burning
     await this.listAssets()
 
     return {
@@ -204,6 +204,17 @@ class BTMSFrontend {
       success: true,
       amountMelted: result.amountMelted
     }
+  }
+
+  /**
+   * Relinquish corrupted or invalid BTMS outputs from the basket.
+   * Useful when a UTXO is not on the overlay and cannot be spent.
+   */
+  async relinquishBadOutputs(): Promise<{
+    relinquished: string[]
+    failed: Array<{ outpoint: string; error: string }>
+  }> {
+    return (this.core as any).relinquishBadOutputs()
   }
 
   /**

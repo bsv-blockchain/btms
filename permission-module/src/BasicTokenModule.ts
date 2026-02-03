@@ -1,5 +1,6 @@
-import { CreateActionArgs, CreateActionResult, CreateSignatureArgs, Hash, LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
+import { CreateActionArgs, CreateActionResult, CreateSignatureArgs, Hash, ListActionsArgs, LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { PermissionsModule } from '@bsv/wallet-toolbox-client'
+import { BTMS } from '../../core'
 
 // ---------------------------------------------------------------------------
 // BTMS Permission Module Constants
@@ -107,6 +108,7 @@ interface AuthorizedTransaction {
  */
 export class BasicTokenModule implements PermissionsModule {
   private readonly promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
+  private readonly btms?: BTMS
 
   /**
    * Session-based authorization tracking.
@@ -137,14 +139,17 @@ export class BasicTokenModule implements PermissionsModule {
    * @param promptUserForTokenUsage - Callback to prompt user for token spending approval.
    *   Should return true if user approves, false if denied.
    *   SECURITY: This callback MUST be implemented securely to prevent UI spoofing.
+   * @param btms - BTMS instance for fetching token metadata via getAssetInfo
    */
   constructor(
-    promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
+    promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>,
+    btms?: any
   ) {
     if (!promptUserForTokenUsage || typeof promptUserForTokenUsage !== 'function') {
       throw new Error('promptUserForTokenUsage callback is required')
     }
     this.promptUserForTokenUsage = promptUserForTokenUsage
+    this.btms = btms
 
     // Start periodic cleanup of expired sessions
     this.startSessionCleanup()
@@ -209,8 +214,12 @@ export class BasicTokenModule implements PermissionsModule {
       await this.handleCreateAction(args as CreateActionArgs, originator)
     } else if (method === 'createSignature') {
       await this.handleCreateSignature(args as CreateSignatureArgs, originator)
+    } else if (method === 'listActions') {
+      await this.handleListActions(args as ListActionsArgs, originator)
+    } else if (method === 'listOutputs') {
+      await this.handleListOutputs(args, originator)
     }
-    // For listOutputs, internalizeAction, relinquishOutput - pass through
+    // For internalizeAction, relinquishOutput - pass through
     // The WalletPermissionsManager already delegates these to us for P-baskets
 
     return { args }
@@ -378,15 +387,28 @@ export class BasicTokenModule implements PermissionsModule {
       throw new Error('Invalid createAction args')
     }
 
+    console.log('[BasicTokenModule.handleCreateAction] originator:', originator)
+    console.log('[BasicTokenModule.handleCreateAction] inputs:', args.inputs?.length ?? 0)
+    console.log('[BasicTokenModule.handleCreateAction] outputs:', args.outputs?.length ?? 0)
+    console.log('[BasicTokenModule.handleCreateAction] labels:', args.labels)
+    console.log('[BasicTokenModule.handleCreateAction] inputDescriptions:', (args.inputs || []).map(i => i?.inputDescription))
+    console.log('[BasicTokenModule.handleCreateAction] outputSummary:', (args.outputs || []).map(o => ({
+      basket: o?.basket,
+      outputDescription: o?.outputDescription,
+      hasLockingScript: !!o?.lockingScript
+    })))
+
     // Check if this is token issuance - auto-approve
     const isIssuance = this.isTokenIssuance(args)
     if (isIssuance) {
+      console.log('[BasicTokenModule.handleCreateAction] detected issuance - auto-approve')
       this.grantSessionAuthorization(originator)
       return
     }
 
     // No inputs = likely issuance (creating new tokens)
     if (!args.inputs || args.inputs.length === 0) {
+      console.log('[BasicTokenModule.handleCreateAction] no inputs - auto-approve')
       this.grantSessionAuthorization(originator)
       return
     }
@@ -394,9 +416,68 @@ export class BasicTokenModule implements PermissionsModule {
     // Extract token spend information for user prompt
     const spendInfo = this.extractTokenSpendInfo(args)
 
+    let labelAssetId: string | undefined
+    if (Array.isArray(args.labels)) {
+      for (const label of args.labels) {
+        if (typeof label === 'string') {
+          const match = label.match(/^p btms assetId (.+)$/)
+          if (match && match[1]) {
+            labelAssetId = match[1]
+            break
+          }
+        }
+      }
+    }
+
+    let enrichedSpendInfo = spendInfo
+    const resolvedAssetId = spendInfo.assetId || labelAssetId
+    if (resolvedAssetId) {
+      const meta = await this.getAssetMetadata(resolvedAssetId)
+      enrichedSpendInfo = {
+        ...spendInfo,
+        assetId: resolvedAssetId,
+        tokenName: meta?.name || spendInfo.tokenName,
+        iconURL: meta?.iconURL || spendInfo.iconURL
+      }
+    }
+
+    console.log('[BasicTokenModule.handleCreateAction] spendInfo:', enrichedSpendInfo)
+
     // Prompt user with detailed token information if available
-    if (spendInfo.sendAmount > 0 || spendInfo.totalInputAmount > 0) {
-      await this.promptForTokenSpend(originator, spendInfo)
+    const hasMeltLabel = Array.isArray(args.labels)
+      && args.labels.some(label => typeof label === 'string' && label.includes('type melt'))
+
+    // Parse melt amount from action description (format: "Melt X tokens of ...")
+    // Note: input descriptions are encrypted, but action description is not
+    let meltAmount = 0
+    if (args.description && typeof args.description === 'string') {
+      const meltMatch = args.description.match(/Melt (\d+) tokens?/i)
+      if (meltMatch) {
+        const parsedAmount = parseInt(meltMatch[1], 10)
+        if (!isNaN(parsedAmount) && parsedAmount > 0) {
+          meltAmount = parsedAmount
+        }
+      }
+    }
+    console.log('[BasicTokenModule.handleCreateAction] description:', args.description)
+
+    const burnAmount = meltAmount > 0
+      ? meltAmount
+      : Math.max(0, enrichedSpendInfo.totalInputAmount - enrichedSpendInfo.changeAmount)
+    const isBurn = hasMeltLabel && burnAmount > 0
+
+    console.log('[BasicTokenModule.handleCreateAction] meltAmount:', meltAmount)
+    console.log('[BasicTokenModule.handleCreateAction] burnAmount:', burnAmount)
+    console.log('[BasicTokenModule.handleCreateAction] isBurn:', isBurn)
+
+    if (isBurn) {
+      await this.promptForTokenBurn(originator, {
+        ...enrichedSpendInfo,
+        sendAmount: burnAmount,
+        totalInputAmount: burnAmount
+      })
+    } else if (enrichedSpendInfo.sendAmount > 0 || enrichedSpendInfo.totalInputAmount > 0) {
+      await this.promptForTokenSpend(originator, enrichedSpendInfo)
     } else {
       // Fallback to generic prompt if we can't parse token details
       await this.promptForGenericAuthorization(originator)
@@ -437,16 +518,16 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     // Parse input descriptions to get total input amount (if not encrypted)
-    // Format: "Spend {amount} tokens"
+    // Format: "Spend {amount} tokens" or "Melt {amount} tokens" / "Input {amount} tokens for melt"
     if (Array.isArray(args.inputs)) {
       for (const input of args.inputs) {
         if (input?.inputDescription && typeof input.inputDescription === 'string') {
-          const match = input.inputDescription.match(/Spend (\d+) tokens?/i)
-          if (match) {
-            const parsedAmount = parseInt(match[1], 10)
-            if (!isNaN(parsedAmount) && parsedAmount > 0) {
-              totalInputAmount += parsedAmount
-            }
+          const spendMatch = input.inputDescription.match(/Spend (\d+) tokens?/i)
+          const meltMatch = input.inputDescription.match(/Melt (\d+) tokens?/i)
+          const meltInputMatch = input.inputDescription.match(/Input (\d+) tokens? for melt/i)
+          const parsedAmount = parseInt((spendMatch || meltMatch || meltInputMatch)?.[1] || '', 10)
+          if (!isNaN(parsedAmount) && parsedAmount > 0) {
+            totalInputAmount += parsedAmount
           }
         }
       }
@@ -542,6 +623,37 @@ export class BasicTokenModule implements PermissionsModule {
 
     if (!approved) {
       throw new Error('User denied permission to spend tokens')
+    }
+
+    this.grantSessionAuthorization(originator)
+  }
+
+  /**
+   * Prompts user for token burn authorization (melt all inputs, no outputs).
+   */
+  private async promptForTokenBurn(originator: string, spendInfo: TokenSpendInfo): Promise<void> {
+    // Input validation
+    if (!originator || typeof originator !== 'string') {
+      throw new Error('Invalid originator')
+    }
+    if (!spendInfo || typeof spendInfo !== 'object') {
+      throw new Error('Invalid spendInfo')
+    }
+
+    const promptData = {
+      type: 'btms_burn',
+      burnAmount: spendInfo.totalInputAmount,
+      tokenName: spendInfo.tokenName,
+      assetId: spendInfo.assetId,
+      iconURL: spendInfo.iconURL,
+      burnAll: spendInfo.totalInputAmount === 0
+    }
+
+    const message = JSON.stringify(promptData)
+    const approved = await this.promptUserForTokenUsage(originator, message)
+
+    if (!approved) {
+      throw new Error('User denied permission to burn tokens')
     }
 
     this.grantSessionAuthorization(originator)
@@ -876,6 +988,106 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     return false
+  }
+
+  /**
+   * Handles listActions requests that query BTMS token labels.
+   * 
+   * Prompts the user when an app tries to list token transactions.
+   * This provides transparency about which apps are accessing token history.
+   * 
+   * @param args - listActions arguments
+   * @param originator - dApp identifier
+   * @throws Error if user denies authorization
+   */
+  private async handleListActions(args: ListActionsArgs, originator: string): Promise<void> {
+    // Extract asset ID from labels if present
+    let assetId: string | undefined
+
+    if (args.labels && Array.isArray(args.labels)) {
+      for (const label of args.labels) {
+        if (typeof label === 'string') {
+          // Parse p-label format: "p btms assetId <assetId>"
+          const match = label.match(/^p btms assetId (.+)$/)
+          if (match && match[1]) {
+            assetId = match[1]
+            break
+          }
+        }
+      }
+    }
+
+    await this.promptForBTMSAccess(originator, assetId)
+  }
+
+  /**
+   * Handles listOutputs requests that query BTMS token baskets.
+   * 
+   * Prompts the user when an app tries to list token balances/UTXOs.
+   * This provides transparency about which apps are accessing token data.
+   * 
+   * @param args - listOutputs arguments
+   * @param originator - dApp identifier
+   * @throws Error if user denies authorization
+   */
+  private async handleListOutputs(args: any, originator: string): Promise<void> {
+    // Extract asset ID from basket if present
+    let assetId: string | undefined
+
+    if (args.basket && typeof args.basket === 'string') {
+      // Parse p-basket format: "p btms" or with asset ID
+      const match = args.basket.match(/^p btms(?:\s+(.+))?$/)
+      if (match && match[1]) {
+        assetId = match[1]
+      }
+    }
+
+    await this.promptForBTMSAccess(originator, assetId)
+  }
+
+  /**
+   * Prompts user once per session for BTMS token access (listActions/listOutputs).
+   */
+  private async promptForBTMSAccess(originator: string, assetId?: string): Promise<void> {
+    if (this.hasSessionAuthorization(originator)) return
+
+    const promptData = {
+      type: 'btms_access',
+      action: 'access BTMS tokens',
+      assetId
+    }
+
+    const message = JSON.stringify(promptData)
+    const approved = await this.promptUserForTokenUsage(originator, message)
+
+    if (!approved) {
+      throw new Error('User denied permission to access BTMS tokens')
+    }
+
+    this.grantSessionAuthorization(originator)
+  }
+
+  /**
+   * Fetches metadata for a specific asset using btms.getAssetInfo.
+   * 
+   * @param assetId - The asset ID to look up
+   * @returns Token metadata or null if not found
+   */
+  private async getAssetMetadata(assetId: string): Promise<{ name?: string; iconURL?: string } | null> {
+    if (!this.btms) return null
+
+    try {
+      const info = await this.btms.getAssetInfo(assetId)
+      if (info) {
+        return {
+          name: info.name,
+          iconURL: info.metadata?.iconURL
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+    return null
   }
 
   /**

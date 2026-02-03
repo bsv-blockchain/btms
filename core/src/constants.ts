@@ -65,24 +65,15 @@ export const BTMS_BASKET = 'p btms' as BasketStringUnder300Bytes
 // Label Constants
 // ---------------------------------------------------------------------------
 
-/** Label for BTMS transactions (for discovery via listActions) */
-export const BTMS_LABEL = 'btms'
+/** Prefix for BTMS P-labels (BRC-111 format: `p <moduleId> <payload>`) */
+export const BTMS_LABEL_PREFIX = 'p btms '
+
 
 // ---------------------------------------------------------------------------
 // Output Tag Constants
 // ---------------------------------------------------------------------------
-
-/** Tag for issued token outputs (owned by issuer) */
-export const TAG_ISSUE = 'btms_issue'
-
-/** Tag for change outputs from send/melt operations (owned) */
-export const TAG_CHANGE = 'btms_change'
-
-/** Tag for received token outputs (owned by recipient) */
-export const TAG_RECEIVED = 'btms_received'
-
-/** Tag for sent token outputs (not owned, sent to recipient) */
-export const TAG_SEND = 'btms_send'
+// Tags follow the format: btms_<category>_<value>
+// Examples: btms_type_issue, btms_direction_incoming, btms_assetid_<assetId>
 
 // ---------------------------------------------------------------------------
 // Validation Constants
@@ -93,6 +84,3 @@ export const MAX_TOKEN_AMOUNT = Number.MAX_SAFE_INTEGER
 
 /** Minimum allowed token amount */
 export const MIN_TOKEN_AMOUNT = 1
-
-/** Maximum metadata JSON length (in bytes) */
-export const MAX_METADATA_LENGTH = 65536

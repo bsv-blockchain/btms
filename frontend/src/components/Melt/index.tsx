@@ -1,14 +1,14 @@
 // React / UI (btms-ui)
 import React, { useState } from 'react'
-import { 
-  Typography, 
-  Button, 
-  Dialog, 
-  DialogActions, 
-  DialogContent, 
-  DialogTitle, 
-  TextField, 
-  CircularProgress, 
+import {
+  Typography,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+  CircularProgress,
   Box,
   Alert
 } from '@mui/material'
@@ -57,7 +57,8 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
         return
       }
 
-      await btms.melt(assetId, qty)
+      const amountToBurn = qty === asset.balance ? undefined : qty
+      await btms.burn(assetId, amountToBurn)
 
       try {
         onReloadNeeded()
@@ -70,16 +71,20 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
     } catch (err: any) {
       console.error(err)
       const rawMessage = err?.message || ''
-      
+
       // Parse user-friendly error messages
       let userMessage = 'Something went wrong!'
-      
+
       if (rawMessage.includes('User denied')) {
         userMessage = 'Transaction cancelled by user'
       } else if (rawMessage.includes('Permission denied') || rawMessage.includes('permission')) {
         userMessage = 'Permission request cancelled'
       } else if (rawMessage.includes('Insufficient') || rawMessage.includes('insufficient')) {
         userMessage = 'Insufficient balance for this transaction'
+      } else if (rawMessage.includes('Cannot read properties of undefined')) {
+        userMessage = 'Token data is corrupted. Please try refreshing the page.'
+      } else if (rawMessage.includes('No spendable tokens found')) {
+        userMessage = 'No tokens available to melt'
       } else if (rawMessage.includes('network') || rawMessage.includes('Network')) {
         userMessage = 'Network error. Please check your connection and try again.'
       } else {
@@ -90,7 +95,7 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
           userMessage = rawMessage
         }
       }
-      
+
       toast.error(userMessage, { autoClose: 5000 })
     } finally {
       setLoading(false)
@@ -99,10 +104,10 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
 
   return (
     <>
-      <Button 
-        onClick={() => setOpen(true)} 
-        variant="outlined" 
-        color="error" 
+      <Button
+        onClick={() => setOpen(true)}
+        variant="outlined"
+        color="error"
         disabled={asset.balance === 0}
         sx={{ minWidth: 100 }}
         startIcon={<LocalFireDepartmentIcon />}
@@ -155,9 +160,9 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
                 sx={{ mb: 2 }}
               />
 
-              <Button 
-                variant="text" 
-                color="error" 
+              <Button
+                variant="text"
+                color="error"
                 size="small"
                 onClick={() => setQuantity(String(asset.balance))}
               >
@@ -169,15 +174,15 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
           {!loading && confirmStep && (
             <Box sx={{ textAlign: 'center', py: 2 }}>
               <LocalFireDepartmentIcon sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
-              
+
               <Typography variant="h5" sx={{ mb: 2 }}>
                 Confirm Burn
               </Typography>
-              
+
               <Typography variant="body1" sx={{ mb: 3 }}>
                 You are about to permanently burn <strong>{qty} {asset.name}</strong>.
               </Typography>
-              
+
               <Alert severity="error" sx={{ textAlign: 'left' }}>
                 <Typography variant="body2">
                   This action is <strong>irreversible</strong>. The tokens will be permanently removed from circulation and cannot be recovered.

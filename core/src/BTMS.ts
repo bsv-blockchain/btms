@@ -63,15 +63,11 @@ import {
   BTMS_LOOKUP_SERVICE,
   BTMS_PROTOCOL_ID,
   BTMS_KEY_ID,
-  BTMS_LABEL,
   BTMS_BASKET,
+  BTMS_LABEL_PREFIX,
   BTMS_MESSAGE_BOX,
   DEFAULT_TOKEN_SATOSHIS,
-  ISSUE_MARKER,
-  TAG_ISSUE,
-  TAG_CHANGE,
-  TAG_RECEIVED,
-  TAG_SEND
+  ISSUE_MARKER
 } from './constants.js'
 
 /**
@@ -172,18 +168,19 @@ export class BTMS {
 
       const monthLabel = this.getMonthLabel()
       const timestampLabel = this.getTimestampLabel()
+      const monthTag = this.getMonthTag()
+      const timestampTag = this.getTimestampTag()
       const counterparty = await this.getIdentityKey()
 
       // Build the action WITHOUT a basket - we'll internalize after to use the real assetId
       const args: CreateActionArgs = {
         description: `Issue ${amount} ${tokenName}`,
         labels: [
-          BTMS_LABEL as LabelStringUnder300Bytes,
-          'btms_type_issue' as LabelStringUnder300Bytes,
-          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type issue` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction incoming` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
-          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+          `${BTMS_LABEL_PREFIX}counterparty ${counterparty}` as LabelStringUnder300Bytes
         ],
         outputs: [
           {
@@ -194,7 +191,13 @@ export class BTMS {
               derivationSuffix
             }),
             outputDescription: `Issue ${amount} ${tokenName}`,
-            tags: [TAG_ISSUE] as OutputTagStringUnder300Bytes[]
+            tags: [
+              'btms_type_issue',
+              'btms_direction_incoming',
+              timestampTag,
+              monthTag,
+              `btms_counterparty_${counterparty}`
+            ] as OutputTagStringUnder300Bytes[]
           }
         ],
         options: {
@@ -217,13 +220,12 @@ export class BTMS {
       await this.wallet.internalizeAction({
         tx: createResult.tx,
         labels: [
-          BTMS_LABEL as LabelStringUnder300Bytes,
-          'btms_type_issue' as LabelStringUnder300Bytes,
-          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type issue` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction incoming` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
-          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
-          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+          `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}counterparty ${counterparty}` as LabelStringUnder300Bytes
         ],
         outputs: [{
           outputIndex: 0 as PositiveIntegerOrZero,
@@ -234,7 +236,14 @@ export class BTMS {
               derivationPrefix,
               derivationSuffix
             }),
-            tags: [TAG_ISSUE] as OutputTagStringUnder300Bytes[]
+            tags: [
+              'btms_type_issue',
+              'btms_direction_incoming',
+              timestampTag,
+              monthTag,
+              `btms_assetid_${assetId}`,
+              `btms_counterparty_${counterparty}`
+            ] as OutputTagStringUnder300Bytes[]
           }
         }],
         description: `Issue ${amount} ${tokenName}`
@@ -329,6 +338,10 @@ export class BTMS {
 
       // Build outputs
       const outputs: CreateActionOutput[] = []
+      const monthLabel = this.getMonthLabel()
+      const timestampLabel = this.getTimestampLabel()
+      const monthTag = this.getMonthTag()
+      const timestampTag = this.getTimestampTag()
 
       // Generate random derivation for recipient output
       const transferDerivationPrefix = Utils.toBase64(Random(32))
@@ -354,7 +367,14 @@ export class BTMS {
           derivationSuffix: recipientDerivationSuffix
         }),
         outputDescription: `Send ${amount} tokens`,
-        tags: [TAG_SEND] as OutputTagStringUnder300Bytes[]
+        tags: [
+          'btms_type_send',
+          'btms_direction_outgoing',
+          timestampTag,
+          monthTag,
+          `btms_assetid_${assetId}`,
+          `btms_counterparty_${recipient}`
+        ] as OutputTagStringUnder300Bytes[]
       })
 
       // Change outputs (if needed)
@@ -391,7 +411,13 @@ export class BTMS {
             }),
             basket: BTMS_BASKET,
             outputDescription: `Change: ${changeOutput.amount} tokens`,
-            tags: [TAG_CHANGE] as OutputTagStringUnder300Bytes[]
+            tags: [
+              'btms_type_change',
+              'btms_direction_incoming',
+              timestampTag,
+              monthTag,
+              `btms_assetid_${assetId}`
+            ] as OutputTagStringUnder300Bytes[]
           })
         }
       }
@@ -402,19 +428,16 @@ export class BTMS {
         unlockingScriptLength: 74,
         inputDescription: `Spend ${u.token.amount} tokens`
       }))
-      const monthLabel = this.getMonthLabel()
-      const timestampLabel = this.getTimestampLabel()
       // Create the action with BEEF from overlay
       const createArgs: CreateActionArgs = {
         description: `Send ${amount} tokens to ${recipient.slice(0, 8)}...`,
         labels: [
-          BTMS_LABEL as LabelStringUnder300Bytes,
-          'btms_type_send' as LabelStringUnder300Bytes,
-          'btms_direction_outgoing' as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type send` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction outgoing` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
-          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
-          `btms_counterparty_${recipient}` as LabelStringUnder300Bytes
+          `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}counterparty ${recipient}` as LabelStringUnder300Bytes
         ],
         inputBEEF: inputBeef.toBinary(),
         inputs,
@@ -476,32 +499,32 @@ export class BTMS {
   }
 
   // ---------------------------------------------------------------------------
-  // Melting (Burning) Tokens
+  // Burning Tokens
   // ---------------------------------------------------------------------------
 
   /**
-   * Melt (burn/destroy) tokens permanently.
+   * Burn (destroy) tokens permanently.
    * 
    * This operation spends token UTXOs without creating corresponding outputs,
    * effectively destroying the tokens. This is useful when tokens represent
    * claims on physical assets that have been redeemed (e.g., trading gold
    * tokens for physical gold).
    * 
-   * @param assetId - The asset to melt
-   * @param amount - Amount to melt (if undefined, melts entire balance)
+   * @param assetId - The asset to burn
+   * @param amount - Amount to burn (if undefined, burns entire balance)
    * @param options - Optional change strategy for remaining balance
-   * @returns Melt result with transaction details
+   * @returns Burn result with transaction details
    * 
    * @example
    * ```typescript
-   * // Melt 50 tokens
-   * const result = await btms.melt('abc123.0', 50)
+   * // Burn 50 tokens
+   * const result = await btms.burn('abc123.0', 50)
    * 
-   * // Melt entire balance
-   * const result = await btms.melt('abc123.0')
+   * // Burn entire balance
+   * const result = await btms.burn('abc123.0')
    * ```
    */
-  async melt(
+  async burn(
     assetId: string,
     amount?: number,
     options: { changeStrategy?: ChangeStrategyOptions } = {}
@@ -525,30 +548,35 @@ export class BTMS {
       // Calculate total available
       const totalAvailable = utxos.reduce((sum, u) => sum + u.token.amount, 0)
 
-      // Determine amount to melt
-      const amountToMelt = amount ?? totalAvailable
+      // Determine amount to burn
+      const amountToBurn = amount ?? totalAvailable
 
-      if (amountToMelt > totalAvailable) {
-        throw new Error(`Insufficient balance. Have ${totalAvailable}, trying to melt ${amountToMelt}`)
+      if (amountToBurn > totalAvailable) {
+        throw new Error(`Insufficient balance. Have ${totalAvailable}, trying to burn ${amountToBurn}`)
       }
 
-      // Select UTXOs to cover the amount to melt
-      const { selected, totalInput, inputBeef } = await this.selectAndVerifyUTXOs(utxos, amountToMelt)
+      // Select UTXOs to cover the amount to burn
+      const { selected, totalInput, inputBeef } = await this.selectAndVerifyUTXOs(utxos, amountToBurn)
 
       // Get metadata from first selected UTXO (for change output if needed)
       const metadata = selected[0].token.metadata
 
-      // Build outputs (only change if partial melt)
+      // Build outputs (only change if partial burn)
       const outputs: CreateActionOutput[] = []
-      const changeAmount = totalInput - amountToMelt
+      const changeAmount = totalInput - amountToBurn
+      const monthLabel = this.getMonthLabel()
+      const timestampLabel = this.getTimestampLabel()
+      const monthTag = this.getMonthTag()
+      const timestampTag = this.getTimestampTag()
+      const counterparty = await this.getIdentityKey()
 
       if (changeAmount > 0) {
-        // Partial melt - return change to self using the specified strategy
+        // Partial burn - return change to self using the specified strategy
         const changeDerivationPrefix = Utils.toBase64(Random(32))
 
         const changeContext: ChangeContext = {
           changeAmount,
-          paymentAmount: amountToMelt,
+          paymentAmount: amountToBurn,
           totalInput,
           assetId
         }
@@ -574,36 +602,37 @@ export class BTMS {
               derivationSuffix: changeDerivationSuffix
             }),
             basket: BTMS_BASKET,
-            outputDescription: `Change after melting: ${changeOutput.amount} tokens`,
-            tags: [TAG_CHANGE] as OutputTagStringUnder300Bytes[]
+            outputDescription: `Change after burning: ${changeOutput.amount} tokens`,
+            tags: [
+              'btms_type_change',
+              'btms_direction_incoming',
+              timestampTag,
+              monthTag,
+              `btms_assetid_${assetId}`
+            ] as OutputTagStringUnder300Bytes[]
           })
         }
       }
 
       // Build inputs - note: inputDescription should reflect what's happening to the tokens
-      // The actual melt amount is amountToMelt, change goes back to user
+      // The actual burn amount is amountToBurn, change goes back to user
       const inputs = selected.map((u, i) => ({
         outpoint: u.outpoint as OutpointString,
         unlockingScriptLength: 74,
         inputDescription: i === 0
-          ? `Melt ${amountToMelt} tokens (from UTXO with ${u.token.amount})`
-          : `Input ${u.token.amount} tokens for melt`
+          ? `Burn ${amountToBurn} tokens (from UTXO with ${u.token.amount})`
+          : `Input ${u.token.amount} tokens for burn`
       }))
-      const monthLabel = this.getMonthLabel()
-      const timestampLabel = this.getTimestampLabel()
-      const counterparty = await this.getIdentityKey()
-
       // Create the action
       const createArgs: CreateActionArgs = {
-        description: `Melt ${amountToMelt} tokens of ${assetId.slice(0, 8)}...`,
+        description: `Burn ${amountToBurn} tokens of ${assetId.slice(0, 8)}...`,
         labels: [
-          BTMS_LABEL as LabelStringUnder300Bytes,
-          'btms_type_melt' as LabelStringUnder300Bytes,
-          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type melt` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction incoming` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
-          `btms_assetId_${assetId}` as LabelStringUnder300Bytes,
-          `btms_counterparty_${counterparty}` as LabelStringUnder300Bytes
+          `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}counterparty ${counterparty}` as LabelStringUnder300Bytes
         ],
         inputBEEF: inputBeef.toBinary(),
         inputs,
@@ -629,7 +658,7 @@ export class BTMS {
           success: true,
           txid,
           assetId,
-          amountMelted: amountToMelt
+          amountMelted: amountToBurn
         }
       } catch (broadcastError: any) {
         // When burning all tokens (no outputs), overlay won't admit/retain anything
@@ -657,7 +686,7 @@ export class BTMS {
             success: true,
             txid,
             assetId,
-            amountMelted: amountToMelt
+            amountMelted: amountToBurn
           }
         }
 
@@ -778,17 +807,18 @@ export class BTMS {
       })
       const monthLabel = this.getMonthLabel()
       const timestampLabel = this.getTimestampLabel()
+      const monthTag = this.getMonthTag()
+      const timestampTag = this.getTimestampTag()
 
       await this.wallet.internalizeAction({
         tx: token.beef,
         labels: [
-          BTMS_LABEL as LabelStringUnder300Bytes,
-          'btms_type_receive' as LabelStringUnder300Bytes,
-          'btms_direction_incoming' as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type receive` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction incoming` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
-          `btms_assetId_${token.assetId}` as LabelStringUnder300Bytes,
-          `btms_counterparty_${token.sender}` as LabelStringUnder300Bytes
+          `${BTMS_LABEL_PREFIX}assetId ${token.assetId}` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}counterparty ${token.sender}` as LabelStringUnder300Bytes
         ],
         outputs: [
           {
@@ -797,7 +827,14 @@ export class BTMS {
             insertionRemittance: {
               basket: BTMS_BASKET,
               customInstructions: augmentedInstructions,
-              tags: [TAG_RECEIVED] as OutputTagStringUnder300Bytes[]
+              tags: [
+                'btms_type_receive',
+                'btms_direction_incoming',
+                timestampTag,
+                monthTag,
+                `btms_assetid_${token.assetId}`,
+                `btms_counterparty_${token.sender}`
+              ] as OutputTagStringUnder300Bytes[]
             }
           }
         ],
@@ -843,12 +880,69 @@ export class BTMS {
   }
 
   /**
+   * Get info for a specific asset by ID using a targeted tag-based query.
+   * Uses the assetId label to efficiently find outputs for this asset.
+   * 
+   * @param assetId - The asset ID to look up
+   * @returns Asset info with name and metadata, or null if not found
+   */
+  async getAssetInfo(assetId: string): Promise<{ name?: string; metadata?: BTMSAssetMetadata } | null> {
+    if (!BTMSToken.isValidAssetId(assetId)) return null
+    return await this.lookupAssetMetadataOnOverlay(assetId)
+  }
+
+  /**
+   * Lookup asset metadata from the overlay using assetId and BEEF.
+   */
+  private async lookupAssetMetadataOnOverlay(
+    assetId: string
+  ): Promise<{ name?: string; metadata?: BTMSAssetMetadata } | null> {
+    try {
+      const lookup = new LookupResolver({ networkPreset: this.networkPreset })
+      const result = await lookup.query({
+        service: BTMS_LOOKUP_SERVICE,
+        query: { assetId, limit: 1 }
+      })
+
+      if (result.type !== 'output-list' || result.outputs.length === 0) {
+        return null
+      }
+
+      const output = result.outputs[0] as { context: any; outputIndex: number; beef?: number[] }
+      if (!output.beef) return null
+      const tx = Transaction.fromBEEF(output.beef)
+      const lockingScript = tx.outputs[output.outputIndex]?.lockingScript
+      if (!lockingScript) return null
+
+      const decoded = BTMSToken.decode(lockingScript)
+      if (!decoded.valid) return null
+
+      const resolvedAssetId = decoded.assetId === ISSUE_MARKER
+        ? `${tx.id('hex')}.${output.outputIndex}`
+        : decoded.assetId
+
+      if (resolvedAssetId !== assetId) {
+        return null
+      }
+
+      if (decoded.metadata) {
+        const meta = typeof decoded.metadata === 'string'
+          ? JSON.parse(decoded.metadata)
+          : decoded.metadata
+        return { name: meta?.name, metadata: meta }
+      }
+      return { name: undefined, metadata: undefined }
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * List all assets owned by this wallet.
    * 
    * @returns List of assets with balances
    */
   async listAssets(): Promise<BTMSAsset[]> {
-    console.log('[BTMS.listAssets] Starting asset discovery')
     const assetIds = new Set<string>()
 
     // Discover assets efficiently using single basket query with tag filtering
@@ -857,18 +951,14 @@ export class BTMS {
     const assetBalances = new Map<string, { balance: number; metadata?: BTMSAssetMetadata }>()
 
     try {
-      console.log('[BTMS.listAssets] Querying BTMS basket for owned tokens')
-
       // Query all owned BTMS tokens (issue, change, received) from single basket
       const result: ListOutputsResult = await this.wallet.listOutputs({
         basket: BTMS_BASKET,
-        tags: [TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED],
+        tags: ['btms_type_issue', 'btms_type_change', 'btms_type_receive'],
         tagQueryMode: 'any',
         include: 'locking scripts',
         limit: 10000
       })
-
-      console.log('[BTMS.listAssets] Found', result.outputs.length, 'owned token outputs')
 
       // Decode each output to discover unique assets AND calculate balances in one pass
       for (const output of result.outputs) {
@@ -910,20 +1000,16 @@ export class BTMS {
         }
       }
 
-      console.log('[BTMS.listAssets] Discovered', assetIds.size, 'unique assets')
     } catch (error) {
-      console.error('[BTMS.listAssets] Error in discovery:', error)
     }
 
     // Get all incoming payments once (used for both discovery and per-asset checks)
-    console.log('[BTMS.listAssets] Checking for incoming payments, comms available:', !!this.comms)
     const allIncoming: IncomingToken[] = []
     if (this.comms) {
       try {
         const messages = await this.comms.listMessages({
           messageBox: BTMS_MESSAGE_BOX
         })
-        console.log('[BTMS.listAssets] Found', messages.length, 'incoming messages')
         for (const msg of messages) {
           try {
             const payment = JSON.parse(msg.body) as IncomingToken
@@ -944,7 +1030,6 @@ export class BTMS {
     }
 
     // Build asset list with balances (already calculated from initial query)
-    console.log('[BTMS.listAssets] Building final asset list from', assetIds.size, 'discovered assets')
     const assets: BTMSAsset[] = []
 
     for (const assetId of assetIds) {
@@ -956,7 +1041,6 @@ export class BTMS {
       const incomingForAsset = allIncoming.filter(p => p.assetId === assetId)
       const hasPendingIncoming = incomingForAsset.length > 0
 
-      console.log('[BTMS.listAssets] Asset', assetId, '- balance:', balance, 'incoming:', hasPendingIncoming)
       // Only include assets with balance or pending incoming
       if (balance > 0 || hasPendingIncoming) {
         assets.push({
@@ -969,7 +1053,6 @@ export class BTMS {
       }
     }
 
-    console.log('[BTMS.listAssets] Returning', assets.length, 'assets')
     return assets
   }
 
@@ -988,7 +1071,9 @@ export class BTMS {
   ): Promise<GetTransactionsResult> {
     // Query wallet actions filtered by assetId label, including outputs and inputs to get token amounts
     const result: ListActionsResult = await this.wallet.listActions({
-      labels: [BTMS_LABEL, `btms_assetId_${assetId}` as LabelStringUnder300Bytes],
+      labels: [
+        `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes
+      ],
       labelQueryMode: 'all',
       includeLabels: true,
       includeOutputs: true,
@@ -1004,32 +1089,37 @@ export class BTMS {
     for (const action of result.actions) {
       // Parse labels to determine transaction type and direction
       const labels = action.labels || []
+      const labelPayloads = labels.map(label =>
+        label.startsWith(BTMS_LABEL_PREFIX)
+          ? label.slice(BTMS_LABEL_PREFIX.length)
+          : label
+      )
       let type: 'issue' | 'send' | 'receive' | 'melt' = 'send'
       let direction: 'incoming' | 'outgoing' = 'outgoing'
       let counterparty: PubKeyHex | undefined
 
       // Extract type from labels
-      if (labels.some(l => l.includes('btms_type_issue'))) {
+      if (labelPayloads.some(l => l.includes('type issue'))) {
         type = 'issue'
-      } else if (labels.some(l => l.includes('btms_type_send'))) {
+      } else if (labelPayloads.some(l => l.includes('type send'))) {
         type = 'send'
-      } else if (labels.some(l => l.includes('btms_type_receive'))) {
+      } else if (labelPayloads.some(l => l.includes('type receive'))) {
         type = 'receive'
-      } else if (labels.some(l => l.includes('btms_type_melt'))) {
+      } else if (labelPayloads.some(l => l.includes('type melt'))) {
         type = 'melt'
       }
 
       direction = (type === 'send' || type === 'melt') ? 'outgoing' : 'incoming'
 
       // Extract counterparty from labels
-      const counterpartyLabel = labels.find(l => l.startsWith('btms_counterparty_'))
+      const counterpartyLabel = labelPayloads.find(l => l.startsWith('counterparty '))
       if (counterpartyLabel) {
-        counterparty = counterpartyLabel.replace('btms_counterparty_', '') as PubKeyHex
+        counterparty = counterpartyLabel.replace('counterparty ', '') as PubKeyHex
       }
 
-      const timestampLabel = labels.find(l => l.startsWith('btms_timestamp_'))
+      const timestampLabel = labelPayloads.find(l => l.startsWith('timestamp '))
       const timestamp = timestampLabel
-        ? Number(timestampLabel.replace('btms_timestamp_', ''))
+        ? Number(timestampLabel.replace('timestamp ', ''))
         : undefined
 
       // Extract amount from actual token outputs
@@ -1037,22 +1127,22 @@ export class BTMS {
 
       if (type === 'issue' && action.outputs) {
         for (const output of action.outputs) {
-          if (!output.tags?.includes(TAG_ISSUE)) continue
+          if (!output.tags?.includes('btms_type_issue')) continue
           const outputAmount = decodeOutputAmount(output, action.txid, assetId)
           if (outputAmount !== null) amount += outputAmount
         }
       } else if (type === 'receive' && action.outputs) {
         for (const output of action.outputs) {
-          if (!output.tags?.includes(TAG_RECEIVED)) continue
+          if (!output.tags?.includes('btms_type_receive')) continue
           const outputAmount = decodeOutputAmount(output, action.txid, assetId)
           if (outputAmount !== null) amount += outputAmount
         }
       } else if (type === 'send') {
-        const sendOutputs = action.outputs?.filter(output => output.tags?.includes(TAG_SEND)) ?? []
+        const sendOutputs = action.outputs?.filter(output => output.tags?.includes('btms_type_send')) ?? []
         const hasSendOutputs = sendOutputs.length > 0
 
-        // Count all TAG_SEND outputs (these are sent to counterparty, no basket)
-        // TAG_CHANGE outputs are change and have basket, so they're not included here
+        // Count all btms_type_send outputs (these are sent to counterparty, no basket)
+        // btms_type_change outputs are change and have basket, so they're not included here
         for (const output of sendOutputs) {
           const outputAmount = decodeOutputAmount(output, action.txid, assetId)
           if (outputAmount !== null) amount += outputAmount
@@ -1071,7 +1161,7 @@ export class BTMS {
           let changeAmount = 0
           if (action.outputs) {
             for (const output of action.outputs) {
-              if (!output.tags?.includes(TAG_CHANGE)) continue
+              if (!output.tags?.includes('btms_type_change')) continue
               const outputAmount = decodeOutputAmount(output, action.txid, assetId)
               if (outputAmount !== null) changeAmount += outputAmount
             }
@@ -1090,7 +1180,7 @@ export class BTMS {
         let changeAmount = 0
         if (action.outputs) {
           for (const output of action.outputs) {
-            if (!output.tags?.includes(TAG_CHANGE)) continue
+            if (!output.tags?.includes('btms_type_change')) continue
             const outputAmount = decodeOutputAmount(output, action.txid, assetId)
             if (outputAmount !== null) changeAmount += outputAmount
           }
@@ -1137,7 +1227,7 @@ export class BTMS {
     // Query all owned tokens from single BTMS basket
     const result: ListOutputsResult = await this.wallet.listOutputs({
       basket: BTMS_BASKET,
-      tags: [TAG_ISSUE, TAG_CHANGE, TAG_RECEIVED],
+      tags: ['btms_type_issue', 'btms_type_change', 'btms_type_receive'],
       tagQueryMode: 'any',
       include: includeBeef ? 'entire transactions' : 'locking scripts',
       includeTags: true,
@@ -1148,52 +1238,133 @@ export class BTMS {
     const tokens: BTMSTokenOutput[] = []
 
     for (const output of result.outputs) {
-      if (!output.spendable) continue
-      if (output.satoshis !== DEFAULT_TOKEN_SATOSHIS) continue
+      try {
+        if (!output.spendable) continue
+        if (output.satoshis !== DEFAULT_TOKEN_SATOSHIS) continue
 
-      const [txid, outputIndexStr] = output.outpoint.split('.')
-      const outputIndex = Number(outputIndexStr)
+        const [txid, outputIndexStr] = output.outpoint.split('.')
+        const outputIndex = Number(outputIndexStr)
 
-      let scriptHex: LockingScript | HexString | undefined
-      if (includeBeef) {
-        // When includeBeef is true, lockingScript is not returned - get it from the transaction
-        if (!result.BEEF) {
+        let scriptHex: LockingScript | HexString | undefined
+        if (includeBeef) {
+          // When includeBeef is true, lockingScript is not returned - get it from the transaction
+          if (!result.BEEF) {
+            continue
+          }
+          const tx = Transaction.fromBEEF(result.BEEF, txid)
+          scriptHex = tx.outputs[Number(outputIndexStr)].lockingScript
+        } else {
+          // When includeBeef is false, use the returned lockingScript
+          scriptHex = output.lockingScript
+        }
+
+        if (!scriptHex) {
           continue
         }
-        const tx = Transaction.fromBEEF(result.BEEF, txid)
-        scriptHex = tx.outputs[Number(outputIndexStr)].lockingScript
-      } else {
-        // When includeBeef is false, use the returned lockingScript
-        scriptHex = output.lockingScript
-      }
 
-      if (!scriptHex) {
+        const decoded = BTMSToken.decode(scriptHex)
+        if (!decoded.valid) continue
+
+        // For transfer outputs, verify the assetId matches
+        if (decoded.assetId !== ISSUE_MARKER && decoded.assetId !== assetId) continue
+
+        tokens.push({
+          outpoint: output.outpoint,
+          txid: txid as TXIDHexString,
+          outputIndex,
+          satoshis: output.satoshis,
+          lockingScript: scriptHex as HexString,
+          customInstructions: output.customInstructions,
+          token: decoded,
+          spendable: true,
+          // Per-output beef comes from result.BEEF (shared across all outputs)
+          beef: includeBeef && result.BEEF ? result.BEEF : undefined
+        })
+      } catch (error) {
+        // Log corrupted token data and skip it
+        console.warn(`[BTMS.getSpendableTokens] Skipping corrupted token at ${output.outpoint}:`, error)
         continue
       }
-
-      const decoded = BTMSToken.decode(scriptHex)
-      if (!decoded.valid) continue
-
-      // For transfer outputs, verify the assetId matches
-      if (decoded.assetId !== ISSUE_MARKER && decoded.assetId !== assetId) continue
-
-      tokens.push({
-        outpoint: output.outpoint,
-        txid: txid as TXIDHexString,
-        outputIndex,
-        satoshis: output.satoshis,
-        lockingScript: scriptHex as HexString,
-        customInstructions: output.customInstructions,
-        token: decoded,
-        spendable: true,
-        // Per-output beef comes from result.BEEF (shared across all outputs)
-        beef: includeBeef && result.BEEF ? result.BEEF : undefined
-      })
     }
 
     // Also return the merged BEEF for convenience
     const beef = includeBeef && result.BEEF ? Beef.fromBinary(Utils.toArray(result.BEEF)) : undefined
     return { tokens, beef }
+  }
+
+  /**
+   * Find outputs in the BTMS basket that cannot be decoded as valid tokens.
+   * Useful for cleaning up corrupted or non-overlay outputs.
+   */
+  async findBadOutputs(): Promise<Array<{ outpoint: string; reason: string }>> {
+    const result: ListOutputsResult = await this.wallet.listOutputs({
+      basket: BTMS_BASKET,
+      tags: ['btms_type_issue', 'btms_type_change', 'btms_type_receive'],
+      tagQueryMode: 'any',
+      include: 'locking scripts',
+      limit: 10000
+    })
+
+    const badOutputs: Array<{ outpoint: string; reason: string }> = []
+
+    for (const output of result.outputs) {
+      if (!output.spendable) continue
+
+      if (output.satoshis !== DEFAULT_TOKEN_SATOSHIS) {
+        badOutputs.push({ outpoint: output.outpoint, reason: 'Unexpected satoshi value' })
+        continue
+      }
+
+      if (!output.lockingScript) {
+        badOutputs.push({ outpoint: output.outpoint, reason: 'Missing locking script' })
+        continue
+      }
+
+      try {
+        const decoded = BTMSToken.decode(output.lockingScript)
+        if (!decoded.valid) {
+          badOutputs.push({ outpoint: output.outpoint, reason: decoded.error || 'Invalid token encoding' })
+          continue
+        }
+      } catch (error) {
+        badOutputs.push({
+          outpoint: output.outpoint,
+          reason: error instanceof Error ? error.message : 'Failed to decode token'
+        })
+      }
+    }
+
+    return badOutputs
+  }
+
+  /**
+   * Relinquish corrupted outputs from the BTMS basket using wallet.relinquishOutput.
+   * Returns which outpoints were relinquished and which failed.
+   */
+  async relinquishBadOutputs(): Promise<{
+    relinquished: string[]
+    failed: Array<{ outpoint: string; error: string }>
+  }> {
+    const badOutputs = await this.findBadOutputs()
+    const relinquished: string[] = []
+    const failed: Array<{ outpoint: string; error: string }> = []
+
+    for (const bad of badOutputs) {
+      try {
+        await this.wallet.relinquishOutput({
+          basket: BTMS_BASKET,
+          output: bad.outpoint
+        })
+        relinquished.push(bad.outpoint)
+      } catch (error) {
+        failed.push({
+          outpoint: bad.outpoint,
+          error: error instanceof Error ? error.message : 'Failed to relinquish output'
+        })
+      }
+    }
+
+    return { relinquished, failed }
   }
 
   // ---------------------------------------------------------------------------
@@ -1456,11 +1627,22 @@ export class BTMS {
     const now = new Date()
     const year = now.getUTCFullYear()
     const month = String(now.getUTCMonth() + 1).padStart(2, '0')
-    return `btms_month_${year}-${month}` as LabelStringUnder300Bytes
+    return `${BTMS_LABEL_PREFIX}month ${year}-${month}` as LabelStringUnder300Bytes
   }
 
   private getTimestampLabel(): LabelStringUnder300Bytes {
-    return `btms_timestamp_${Date.now()}` as LabelStringUnder300Bytes
+    return `${BTMS_LABEL_PREFIX}timestamp ${Date.now()}` as LabelStringUnder300Bytes
+  }
+
+  private getMonthTag(): OutputTagStringUnder300Bytes {
+    const now = new Date()
+    const year = now.getUTCFullYear()
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0')
+    return `btms_month_${year}-${month}` as OutputTagStringUnder300Bytes
+  }
+
+  private getTimestampTag(): OutputTagStringUnder300Bytes {
+    return `btms_timestamp_${Date.now()}` as OutputTagStringUnder300Bytes
   }
 
   private async buildSpendsForInputs(

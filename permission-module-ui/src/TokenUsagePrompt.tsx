@@ -43,14 +43,37 @@ interface BTMSSpendInfo {
 }
 
 /**
+ * Structured token burn info from BasicTokenModule
+ */
+interface BTMSBurnInfo {
+  type: 'btms_burn'
+  burnAmount: number
+  tokenName: string
+  assetId: string
+  iconURL?: string
+  burnAll?: boolean
+}
+
+/**
+ * Unified BTMS access request (listActions/listOutputs)
+ */
+interface BTMSAccessInfo {
+  type: 'btms_access'
+  action: string
+  assetId?: string
+}
+
+type BTMSPromptInfo = BTMSSpendInfo | BTMSBurnInfo | BTMSAccessInfo
+
+/**
  * Parses the BTMS token message to extract structured information.
  * Now supports JSON-encoded spend info from BasicTokenModule.
  */
-const parseTokenMessage = (message: string): BTMSSpendInfo | null => {
+const parseTokenMessage = (message: string): BTMSPromptInfo | null => {
   try {
     const parsed = JSON.parse(message)
-    if (parsed.type === 'btms_spend') {
-      return parsed as BTMSSpendInfo
+    if (parsed.type === 'btms_spend' || parsed.type === 'btms_burn' || parsed.type === 'btms_access') {
+      return parsed as BTMSPromptInfo
     }
   } catch {
     // Not JSON, fall back to legacy parsing
@@ -93,8 +116,9 @@ const truncateHex = (hex: string, startChars = 8, endChars = 6): string => {
 }
 
 /**
- * Modal dialog for prompting user to approve BTMS token spending.
+ * Modal dialog for prompting user to approve BTMS token operations.
  * Displays comprehensive token information in an elegant, user-friendly format.
+ * Supports spend, list actions, and list outputs operations.
  */
 const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
   app,
@@ -102,18 +126,133 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
   onAllow,
   onDeny
 }) => {
-  const spendInfo = useMemo(() => parseTokenMessage(message), [message])
+  const promptInfo = useMemo(() => parseTokenMessage(message), [message])
   const [copied, setCopied] = useState(false)
 
   const handleCopyAssetId = useCallback(() => {
-    if (spendInfo?.assetId) {
-      navigator.clipboard.writeText(spendInfo.assetId)
+    if (promptInfo?.assetId) {
+      navigator.clipboard.writeText(promptInfo.assetId)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
-  }, [spendInfo?.assetId])
+  }, [promptInfo?.assetId])
 
-  if (!spendInfo) {
+  if (!promptInfo) {
+    return null
+  }
+
+  const renderTokenSummary = () => {
+    if (promptInfo.type === 'btms_spend') return null
+
+    const tokenName = 'tokenName' in promptInfo ? (promptInfo.tokenName || 'Tokens') : 'Tokens'
+    const scopeLabel = promptInfo.assetId
+      ? `Token ID: ${truncateHex(promptInfo.assetId, 12, 8)}`
+      : 'Token scope: all tokens'
+    const iconURL = 'iconURL' in promptInfo ? promptInfo.iconURL : undefined
+
+    return (
+      <Stack spacing={1.5} alignItems="center" sx={{ mt: 2 }}>
+        {iconURL ? (
+          <Box sx={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            overflow: 'hidden',
+            bgcolor: 'rgba(255, 255, 255, 0.08)'
+          }}>
+            <Img
+              src={iconURL}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </Box>
+        ) : (
+          <Avatar
+            sx={{
+              width: 56,
+              height: 56,
+              bgcolor: 'rgba(255, 255, 255, 0.08)'
+            }}
+          >
+            <TokenIcon sx={{ fontSize: 28, color: 'white' }} />
+          </Avatar>
+        )}
+        <Typography variant="subtitle1" fontWeight={600}>
+          {tokenName}
+        </Typography>
+        <Chip
+          label={scopeLabel}
+          sx={{
+            bgcolor: 'rgba(255, 255, 255, 0.08)',
+            color: 'rgba(255, 255, 255, 0.8)',
+            fontFamily: 'monospace',
+            maxWidth: '100%'
+          }}
+        />
+      </Stack>
+    )
+  }
+
+  // Determine title and icon based on prompt type
+  const getTitle = () => {
+    if (promptInfo.type === 'btms_spend') return 'Spend Authorization Request'
+    if (promptInfo.type === 'btms_burn') return 'Burn Authorization Request'
+    if (promptInfo.type === 'btms_access') return 'Token Access Request'
+    return 'Authorization Request'
+  }
+
+  const getIcon = () => {
+    if (promptInfo.type === 'btms_spend') return <SendIcon sx={{ fontSize: 40, color: 'white' }} />
+    if (promptInfo.type === 'btms_burn') return <SwapHorizIcon sx={{ fontSize: 40, color: 'white' }} />
+    return <TokenIcon sx={{ fontSize: 40, color: 'white' }} />
+  }
+
+  const getActionText = () => {
+    if (promptInfo.type === 'btms_spend') {
+      const spendInfo = promptInfo as BTMSSpendInfo
+      return (
+        <>
+          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
+            Authorize <strong>{app}</strong> to spend
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
+            {formatAmount(spendInfo.sendAmount)} {spendInfo.tokenName} tokens
+          </Typography>
+        </>
+      )
+    }
+
+    if (promptInfo.type === 'btms_burn') {
+      const burnInfo = promptInfo as BTMSBurnInfo
+      const isBurnAll = burnInfo.burnAll || burnInfo.burnAmount === 0
+      return (
+        <>
+          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
+            Authorize <strong>{app}</strong> to burn tokens
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
+            {isBurnAll
+              ? `All ${burnInfo.tokenName} tokens`
+              : `${formatAmount(burnInfo.burnAmount)} ${burnInfo.tokenName} tokens`}
+          </Typography>
+        </>
+      )
+    }
+
+    if (promptInfo.type === 'btms_access') {
+      return (
+        <>
+          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
+            Authorize <strong>{app}</strong> to access your BTMS tokens
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1.5, color: 'rgba(255, 255, 255, 0.7)' }}>
+            {promptInfo.assetId
+              ? `Token ID: ${truncateHex(promptInfo.assetId, 12, 8)}`
+              : 'Token scope: all tokens'}
+          </Typography>
+        </>
+      )
+    }
+
     return null
   }
 
@@ -133,7 +272,7 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
     >
       <DialogContent sx={{ p: 4, textAlign: 'center' }}>
         <Typography variant="h5" fontWeight="bold" sx={{ mb: 4 }}>
-          Spend Authorization Request
+          {getTitle()}
         </Typography>
 
         <Box sx={{
@@ -143,7 +282,7 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
           mb: 3
         }}>
           {/* Token Icon */}
-          {spendInfo.iconURL ? (
+          {promptInfo.type === 'btms_spend' && (promptInfo as BTMSSpendInfo).iconURL ? (
             <Box sx={{
               width: 80,
               height: 80,
@@ -154,7 +293,7 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
               bgcolor: 'rgba(255, 255, 255, 0.1)'
             }}>
               <Img
-                src={spendInfo.iconURL}
+                src={(promptInfo as BTMSSpendInfo).iconURL!}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             </Box>
@@ -166,18 +305,17 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
               mb: 3,
               bgcolor: 'rgba(255, 255, 255, 0.1)'
             }}>
-              <TokenIcon sx={{ fontSize: 40, color: 'white' }} />
+              {getIcon()}
             </Avatar>
           )}
 
           {/* Authorization Message */}
-          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
-            Authorize <strong>{app}</strong> to spend
-          </Typography>
-          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
-            {formatAmount(spendInfo.sendAmount)} {spendInfo.tokenName} tokens
-          </Typography>
-          {spendInfo.assetId && (
+          {getActionText()}
+
+          {renderTokenSummary()}
+
+          {/* Asset ID */}
+          {promptInfo.assetId && (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1.5 }}>
               <Typography
                 variant="caption"
@@ -187,7 +325,7 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
                   fontSize: '0.75rem'
                 }}
               >
-                {truncateHex(spendInfo.assetId, 12, 8)}
+                {truncateHex(promptInfo.assetId, 12, 8)}
               </Typography>
               <Tooltip title={copied ? 'Copied!' : 'Copy Asset ID'} arrow>
                 <IconButton
