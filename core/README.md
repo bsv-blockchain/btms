@@ -161,6 +161,26 @@ for (const payment of incoming) {
 }
 ```
 
+##### `burn(assetId, amount?)`
+
+Permanently destroy tokens by burning them.
+
+```typescript
+// Burn specific amount
+const result = await btms.burn('abc123...def.0', 100)
+
+// Burn entire balance (amount optional)
+const result = await btms.burn('abc123...def.0')
+
+// Result:
+// {
+//   success: true,
+//   txid: 'def456...',
+//   assetId: 'abc123...def.0',
+//   amountBurned: 100
+// }
+```
+
 ##### `getBalance(assetId)`
 
 Get the balance of a specific asset.
@@ -259,6 +279,18 @@ interface SendResult {
   txid: string
   tokenForRecipient: TokenForRecipient
   changeAmount?: number
+  error?: string
+}
+```
+
+### BurnResult
+
+```typescript
+interface BurnResult {
+  success: boolean
+  txid: string
+  assetId: string
+  amountBurned: number
   error?: string
 }
 ```

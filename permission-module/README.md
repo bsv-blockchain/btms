@@ -10,11 +10,12 @@ This is the **core permission module** for BTMS token operations - framework agn
 - **Framework Agnostic** - Works with any UI framework (React, Vue, Angular, vanilla JS)
 - **Minimal Dependencies** - Only requires `@bsv/sdk` and `@bsv/wallet-toolbox-client`
 
-For ready-to-use React/MUI UI components, see **[@bsv/btms-permission-module-ui](./ui/README.md)**
+For ready-to-use React/MUI UI components, see **@bsv/btms-permission-module-ui**
 
 ## Features
 
-- **Token Spend Authorization**: Prompts users before spending BTMS tokens
+- **Token Spend Authorization**: Prompts users before spending or burning BTMS tokens
+- **Burn Authorization**: Prompts users before permanently destroying tokens
 - **Session-based Authorization**: Caches authorization for transaction flows
 - **Security Verification**: Validates signature requests match authorized transactions
 - **Rich Token Display**: Shows amounts, names, metadata, and transaction details
@@ -100,7 +101,7 @@ return (
 )
 ```
 
-See [@bsv/btms-permission-module-ui](./ui/README.md) for full documentation.
+See the `@bsv/btms-permission-module-ui` package for full documentation.
 
 ## Documentation
 
@@ -128,11 +129,12 @@ The prompt message is a JSON string containing:
 
 ```typescript
 {
-  type: 'btms_spend',
-  sendAmount: number,        // Amount being sent
+  type: 'btms_spend' | 'btms_burn',
+  sendAmount: number,        // Amount being sent (0 for burn)
+  burnAmount?: number,       // Amount being burned (for burn operations)
   tokenName: string,         // Token name
   assetId: string,          // Asset ID (txid.vout)
-  recipient?: string,       // Recipient public key
+  recipient?: string,       // Recipient public key (not present for burn)
   iconURL?: string,         // Token icon URL
   changeAmount: number,     // Change returned
   totalInputAmount: number  // Total from inputs
