@@ -11,29 +11,24 @@ import App from './App'
 import web3Theme from './theme'
 import { btms } from './btms/index'
 
-// eslint-disable-next-line no-console
-console.log('[index.tsx] bundle loaded (react 18 createRoot)')
+  // ---- global BTMS fail-soft patch ----
+  ; (function patchBTMS() {
+    const anyBtms = btms as any
+    if (!anyBtms || typeof anyBtms.listAssets !== 'function') return
+    if (anyBtms.__safeListAssets) return
 
-// ---- global BTMS fail-soft patch ----
-;(function patchBTMS() {
-  const anyBtms = btms as any
-  if (!anyBtms || typeof anyBtms.listAssets !== 'function') return
-  if (anyBtms.__safeListAssets) return
+    const original = anyBtms.listAssets.bind(anyBtms)
 
-  const original = anyBtms.listAssets.bind(anyBtms)
-
-  anyBtms.listAssets = async (...args: any[]) => {
-    try {
-      return await original(...args)
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('btms.listAssets failed (likely LARS / desktop / wallet not running). Returning empty list.', err)
-      return []
+    anyBtms.listAssets = async (...args: any[]) => {
+      try {
+        return await original(...args)
+      } catch (err) {
+        return []
+      }
     }
-  }
 
-  anyBtms.__safeListAssets = true
-})()
+    anyBtms.__safeListAssets = true
+  })()
 // ---- end patch ----
 
 const rootEl = document.getElementById('root')

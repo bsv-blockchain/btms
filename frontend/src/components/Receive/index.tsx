@@ -21,7 +21,7 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { toast } from 'react-toastify'
-import { Asset, btms, IncomingPayment } from '../../btms/index'
+import { Asset, btms, CoreIncomingPayment } from '../../btms/index'
 import { SatoshiValue } from '@bsv/sdk'
 
 type ReceiveProps = {
@@ -43,7 +43,7 @@ const Receive: React.FC<ReceiveProps> = ({
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [identityKey, setIdentityKey] = useState<string | null>(null)
-  const [incoming, setIncoming] = useState<IncomingPayment[]>([])
+  const [incoming, setIncoming] = useState<CoreIncomingPayment[]>([])
 
   // -------------------------
   // 1) Load identity key
@@ -74,8 +74,7 @@ const Receive: React.FC<ReceiveProps> = ({
         const key = typeof raw === 'string' ? raw : raw?.publicKey || ''
 
         if (!cancelled) setIdentityKey(key)
-      } catch (err) {
-        console.error('[Receive] identity key load failed', err)
+      } catch {
         if (!cancelled) setIdentityKey('')
       }
     }
@@ -100,10 +99,9 @@ const Receive: React.FC<ReceiveProps> = ({
       // NEW: btms.listIncomingPayments() now allows zero args
       const msgs = await btms.listIncomingPayments(desiredAssetId!)
 
-      const clean: IncomingPayment[] = Array.isArray(msgs) ? (msgs as IncomingPayment[]) : []
+      const clean: CoreIncomingPayment[] = Array.isArray(msgs) ? (msgs as CoreIncomingPayment[]) : []
       setIncoming(clean)
     } catch (err: unknown) {
-      console.error(err)
       const message = err instanceof Error ? err.message : 'Failed to load incoming payments'
       toast.error(message)
     } finally {
@@ -129,7 +127,7 @@ const Receive: React.FC<ReceiveProps> = ({
     await Promise.resolve(onReloadNeeded())
   }
 
-  const handleAccept = async (payment: IncomingPayment) => {
+  const handleAccept = async (payment: CoreIncomingPayment) => {
     if (!btms || typeof btms.acceptIncomingPayment !== 'function') {
       toast.error('acceptIncomingPayment unavailable')
       return
@@ -149,7 +147,7 @@ const Receive: React.FC<ReceiveProps> = ({
     }
   }
 
-  const handleRefund = async (payment: IncomingPayment) => {
+  const handleRefund = async (payment: CoreIncomingPayment) => {
     if (!btms || typeof btms.refundIncomingTransaction !== 'function') {
       toast.error('refundIncomingTransaction unavailable')
       return

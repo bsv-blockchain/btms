@@ -69,7 +69,6 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       setConfirmStep(false)
       setQuantity('')
     } catch (err: any) {
-      console.error(err)
       const rawMessage = err?.message || ''
 
       // Parse user-friendly error messages

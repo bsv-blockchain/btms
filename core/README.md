@@ -28,8 +28,7 @@ import { MessageBoxClient } from '@bsv/message-box-client'
 const comms = new MessageBoxClient()
 const btms = new BTMS({ 
   networkPreset: 'mainnet',
-  comms,
-  messageBox: 'btms_tokens' // optional, defaults to 'btms_tokens'
+  comms
 })
 
 // Issue new tokens
@@ -103,11 +102,7 @@ const btms = new BTMS(config?: BTMSConfig)
 |--------|------|---------|-------------|
 | `wallet` | `WalletInterface` | `WalletClient()` | Wallet for signing transactions |
 | `networkPreset` | `'local' \| 'mainnet' \| 'testnet'` | `'mainnet'` | Network for overlay services |
-| `tokenSatoshis` | `number` | `1` | Satoshi value for token outputs |
-| `protocolID` | `WalletProtocol` | `[0, 'btms tokens']` | Protocol ID for wallet operations |
-| `keyID` | `string` | `'1'` | Key ID for derivation |
 | `comms` | `CommsLayer` | `undefined` | Optional communications layer (e.g., MessageBoxClient) |
-| `messageBox` | `string` | `'btms_tokens'` | Message box name for token delivery |
 
 #### Methods
 
@@ -127,7 +122,7 @@ const result = await btms.issue(1000, {
 //   success: true,
 //   txid: 'abc123...',
 //   assetId: 'abc123...def.0',
-//   vout: 0,
+//   outputIndex: 0,
 //   amount: 1000
 // }
 ```
@@ -191,14 +186,6 @@ Get all spendable token UTXOs for an asset.
 ```typescript
 const utxos = await btms.getSpendableTokens('abc123...def.0')
 // Returns: BTMSTokenOutput[]
-```
-
-##### `setMessenger(messenger)`
-
-Set a custom token messenger for sending/receiving tokens via messaging.
-
-```typescript
-btms.setMessenger(myCustomMessenger)
 ```
 
 ### BTMSToken Class
@@ -277,21 +264,6 @@ interface SendResult {
 ```
 
 ## Extensibility
-
-### Custom Messaging
-
-BTMS supports pluggable messaging for token delivery. Implement the `TokenMessenger` interface:
-
-```typescript
-interface TokenMessenger {
-  sendToken(recipient: string, token: TokenForRecipient): Promise<void>
-  listIncoming(assetId?: string): Promise<IncomingPayment[]>
-  acknowledgePayment(messageId: string): Promise<void>
-}
-
-// Use your custom messenger
-btms.setMessenger(myMessenger)
-```
 
 ### Ownership Proofs
 

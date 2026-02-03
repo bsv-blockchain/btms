@@ -78,7 +78,6 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       toast.success(`Transferred ${qty} ${asset.name} successfully!`)
       setOpen(false)
     } catch (err: any) {
-      console.error(err)
       const rawMessage = err?.message || ''
 
       // Parse user-friendly error messages

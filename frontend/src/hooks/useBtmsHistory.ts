@@ -78,7 +78,6 @@ export function useBtmsHistory(identityKey: string | null | undefined): UseBtmsH
       setHistory(items)
     } catch (err: any) {
       const msg = err?.message || 'Failed to load BTMS history'
-      console.error('[useBtmsHistory] error', msg)
       setError(msg)
     } finally {
       setLoading(false)

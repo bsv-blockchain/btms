@@ -776,7 +776,7 @@ describe('BTMS', () => {
       }
     })
 
-    it('should label melt actions with asset and melt tag', async () => {
+    it('should label burn actions with asset and burn tag', async () => {
       jest.useFakeTimers()
       jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
       const mockWallet = createMockWallet()
@@ -1545,7 +1545,7 @@ describe('Ownership Proof', () => {
   describe('burn', () => {
     const MOCK_ASSET_ID = `${MOCK_TXID}.0`
 
-    it('should melt entire balance when amount is not specified', async () => {
+    it('should burn entire balance when amount is not specified', async () => {
       const spendableTokens = [
         {
           txid: MOCK_TXID,
@@ -1621,7 +1621,7 @@ describe('Ownership Proof', () => {
       }
     })
 
-    it('should fail when trying to melt more than available balance', async () => {
+    it('should fail when trying to burn more than available balance', async () => {
       const mockWallet = createMockWallet({
         listOutputsResult: {
           totalOutputs: 1,
@@ -1682,7 +1682,7 @@ describe('Ownership Proof', () => {
       })
 
       try {
-        // Try to melt 100 tokens when only 50 available
+        // Try to burn 100 tokens when only 50 available
         const result = await btms.burn(MOCK_ASSET_ID, 100)
 
         expect(result.success).toBe(false)

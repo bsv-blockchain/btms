@@ -3,7 +3,7 @@ import { AdmissionMode, LookupFormula, LookupQuestion, LookupService, OutputAdmi
 import { PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { Db } from 'mongodb'
 import { btmsProtocol, BTMSLookupResult, BTMSQuery, BTMSRecord } from './types.js'
-import docs from './docs/BTMSLookupDocs.md.js'
+import docs from '../docs/BTMSLookupDocs.md.js'
 
 /**
  * Implements a lookup service for BTMS tokens

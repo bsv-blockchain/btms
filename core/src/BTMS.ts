@@ -1280,9 +1280,8 @@ export class BTMS {
           // Per-output beef comes from result.BEEF (shared across all outputs)
           beef: includeBeef && result.BEEF ? result.BEEF : undefined
         })
-      } catch (error) {
-        // Log corrupted token data and skip it
-        console.warn(`[BTMS.getSpendableTokens] Skipping corrupted token at ${output.outpoint}:`, error)
+      } catch {
+        // Skip corrupted token data
         continue
       }
     }

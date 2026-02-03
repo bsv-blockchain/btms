@@ -392,20 +392,20 @@ describe('BTMS Topic Manager', () => {
     })
   })
 
-  describe('Token melting (burning)', () => {
-    it('Allows melting tokens by spending inputs without creating outputs', async () => {
-      // Source transaction with tokens to melt
+  describe('Token burning', () => {
+    it('Allows burning tokens by spending inputs without creating outputs', async () => {
+      // Source transaction with tokens to burn
       const sourceTx = new Transaction()
       sourceTx.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
 
-      // Transaction that spends the tokens but doesn't create any token outputs (melting/burning)
+      // Transaction that spends the tokens but doesn't create any token outputs (burning)
       const tx = new Transaction()
       tx.addInput({
         sourceTransaction: sourceTx,
         sourceOutputIndex: 0,
         unlockingScript: new Script()
       })
-      // No token outputs - tokens are melted/burned
+      // No token outputs - tokens are burned
       // Could have a non-token output for change/fees, but no BTMS token outputs
 
       const beef = createBeefWithSources(tx)
@@ -418,7 +418,7 @@ describe('BTMS Topic Manager', () => {
       })
     })
 
-    it('Allows partial melting - spending more inputs than outputs', async () => {
+    it('Allows partial burning - spending more inputs than outputs', async () => {
       // Source transactions with tokens
       const sourceTx1 = new Transaction()
       sourceTx1.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
@@ -426,7 +426,7 @@ describe('BTMS Topic Manager', () => {
       const sourceTx2 = new Transaction()
       sourceTx2.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '150']), satoshis: 1000 })
 
-      // Transaction that spends 250 tokens but only outputs 100 (melting 150)
+      // Transaction that spends 250 tokens but only outputs 100 (burning 150)
       const tx = new Transaction()
       tx.addInput({
         sourceTransaction: sourceTx1,
@@ -438,7 +438,7 @@ describe('BTMS Topic Manager', () => {
         sourceOutputIndex: 0,
         unlockingScript: new Script()
       })
-      // Only output 100 tokens, effectively melting 150
+      // Only output 100 tokens, effectively burning 150
       tx.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
 
       const beef = createBeefWithSources(tx)
@@ -451,8 +451,8 @@ describe('BTMS Topic Manager', () => {
       })
     })
 
-    it('Allows melting entire balance across multiple assets', async () => {
-      // Multiple assets to melt
+    it('Allows burning entire balance across multiple assets', async () => {
+      // Multiple assets to burn
       const goldSource = new Transaction()
       goldSource.addOutput({ lockingScript: createPushDropScript(testPubKey, ['mock_gold.0', '100']), satoshis: 1000 })
 
@@ -471,7 +471,7 @@ describe('BTMS Topic Manager', () => {
         sourceOutputIndex: 0,
         unlockingScript: new Script()
       })
-      // No token outputs - all tokens melted
+      // No token outputs - all tokens burned
 
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])

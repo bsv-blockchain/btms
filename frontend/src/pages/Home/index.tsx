@@ -23,20 +23,11 @@ import useStyles from './home-style'
 import Receive from '../../components/Receive'
 import Send from '../../components/Send'
 import { Asset, btms } from '../../btms/index'
-import { logWithTimestamp } from '../../utils/logging'
 
 interface HomeProps {
   history: {
     push: (path: string) => void
   }
-}
-
-const HOME_DEBUG = false
-const HOME_SOURCE_TAG = 'frontend/src/pages/Home/index.tsx'
-
-function homeDebug(label: string, ...rest: any[]) {
-  if (!HOME_DEBUG) return
-  logWithTimestamp(`[BTMS:${HOME_SOURCE_TAG}] ${label}`, ...rest)
 }
 
 const INCOMING_REFRESH_MS = 30000
@@ -59,10 +50,8 @@ const Home: React.FC<HomeProps> = ({ history }) => {
   const refreshAssets = async () => {
     try {
       const assets = await btms.listAssets()
-      homeDebug('refreshAssets got', assets)
       setWalletTokens(assets)
     } catch (err: any) {
-      homeDebug('refreshAssets ERROR', err?.message)
       toast.error(err?.message || 'Error refreshing assets')
     }
   }
@@ -94,20 +83,16 @@ const Home: React.FC<HomeProps> = ({ history }) => {
         amountMap[assetId] = (amountMap[assetId] || 0) + numericAmount
       }
 
-      homeDebug('refreshIncoming: maps built', { countMap, amountMap })
-
       setIncomingByAsset(countMap)
       setIncomingAmountsByAsset(amountMap)
       lastIncomingFetchRef.current = now
     } catch (err: any) {
-      homeDebug('refreshIncoming ERROR', err?.message)
       lastIncomingFetchRef.current = now
     }
   }
 
   useEffect(() => {
     ; (async () => {
-      homeDebug('mount: loading')
       try {
         await refreshAssets()
         await refreshIncoming(true)
@@ -181,7 +166,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
       return a.assetId.localeCompare(b.assetId)
     })
 
-    homeDebug('mergedTokens (TYPES FIXED)', { merged: arr })
     return arr
   }, [walletTokens, incomingByAsset, incomingAmountsByAsset])
 
@@ -286,17 +270,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                     ) : (
                       <span style={{ opacity: 0.5 }}>{displayBalance}</span>
                     )
-
-                    homeDebug('rowState', {
-                      assetId: token.assetId,
-                      hasWalletBalance,
-                      walletBalance,
-                      incomingCount,
-                      incomingAmount,
-                      tokenHasPendingIncoming: token.hasPendingIncoming,
-                      hasPendingIncoming,
-                      incomingOnly
-                    })
 
                     let iconURL: string | undefined
                     if (token.metadata) {

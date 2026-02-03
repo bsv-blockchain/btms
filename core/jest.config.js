@@ -22,10 +22,10 @@ export default {
       }
     ]
   },
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/__tests/**/*.test.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
-    '!src/**/__tests__/**'
+    '!src/**/__tests/**'
   ],
   coverageDirectory: 'coverage',
   verbose: true
