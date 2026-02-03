@@ -825,7 +825,7 @@ describe('BTMS', () => {
 
         const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
         expect(createActionCall.labels).toEqual([
-          `${BTMS_LABEL_PREFIX}type melt`,
+          `${BTMS_LABEL_PREFIX}type burn`,
           `${BTMS_LABEL_PREFIX}direction incoming`,
           MOCK_TIMESTAMP_LABEL,
           MOCK_MONTH_LABEL,
@@ -1602,7 +1602,7 @@ describe('Ownership Proof', () => {
 
         expect(result.success).toBe(true)
         expect(result.assetId).toBe(MOCK_ASSET_ID)
-        expect(result.amountMelted).toBe(100)
+        expect(result.amountBurned).toBe(100)
         expect(result.txid).toBe(MOCK_TXID)
 
         expect(mockWallet.calls.createAction).toHaveLength(1)
@@ -1689,7 +1689,7 @@ describe('Ownership Proof', () => {
         expect(result.error).toContain('Insufficient balance')
         expect(result.error).toContain('Have 50')
         expect(result.error).toContain('trying to burn 100')
-        expect(result.amountMelted).toBe(0)
+        expect(result.amountBurned).toBe(0)
       } finally {
         BTMSToken.decode = originalDecode
           ; (btms as any).selectAndVerifyUTXOs = originalSelectAndVerify
@@ -1712,7 +1712,7 @@ describe('Ownership Proof', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('No spendable tokens found')
-      expect(result.amountMelted).toBe(0)
+      expect(result.amountBurned).toBe(0)
     })
 
     it('should fail with invalid asset ID', async () => {
@@ -1723,7 +1723,7 @@ describe('Ownership Proof', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Invalid assetId')
-      expect(result.amountMelted).toBe(0)
+      expect(result.amountBurned).toBe(0)
     })
 
     it('should fail with invalid amount (negative)', async () => {
@@ -1734,7 +1734,7 @@ describe('Ownership Proof', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Amount must be a positive integer')
-      expect(result.amountMelted).toBe(0)
+      expect(result.amountBurned).toBe(0)
     })
 
     it('should fail with invalid amount (non-integer)', async () => {
@@ -1745,7 +1745,7 @@ describe('Ownership Proof', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain('Amount must be a positive integer')
-      expect(result.amountMelted).toBe(0)
+      expect(result.amountBurned).toBe(0)
     })
 
     it('should fail when broadcast fails', async () => {
@@ -1798,7 +1798,7 @@ describe('Ownership Proof', () => {
 
         expect(result.success).toBe(false)
         expect(result.error).toContain('Broadcast failed')
-        expect(result.amountMelted).toBe(0)
+        expect(result.amountBurned).toBe(0)
       } finally {
         getSpendableSpy.mockRestore()
         selectAndVerifySpy.mockRestore()
