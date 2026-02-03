@@ -49,6 +49,14 @@ interface TokenSpendInfo {
   totalInputAmount: number
   /** Change amount (totalInputAmount - sendAmount) */
   changeAmount: number
+  /** Total amount sent in token outputs (derived from outputs) */
+  outputSendAmount: number
+  /** Total amount returned as change in token outputs (derived from outputs) */
+  outputChangeAmount: number
+  /** Whether any token outputs were parsed */
+  hasTokenOutputs: boolean
+  /** Source of totalInputAmount */
+  inputAmountSource: 'beef' | 'descriptions' | 'derived' | 'none'
   /** Token name from metadata */
   tokenName: string
   /** Asset ID */
@@ -143,7 +151,7 @@ export class BasicTokenModule implements PermissionsModule {
    */
   constructor(
     promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>,
-    btms?: any
+    btms?: BTMS
   ) {
     if (!promptUserForTokenUsage || typeof promptUserForTokenUsage !== 'function') {
       throw new Error('promptUserForTokenUsage callback is required')
@@ -175,12 +183,6 @@ export class BasicTokenModule implements PermissionsModule {
     }, 30000) // Every 30 seconds
   }
 
-  /**
-   * Intercepts wallet method requests for P-basket/protocol operations.
-   * 
-   * - createAction: Extract token info from outputs and prompt for authorization
-   * - createSignature: Check session authorization (should already be approved from createAction)
-   */
   /**
    * Intercepts wallet method requests for P-basket/protocol operations.
    * 
@@ -359,15 +361,6 @@ export class BasicTokenModule implements PermissionsModule {
   /**
    * Handles createAction requests that involve BTMS P-baskets.
    * 
-   * This is called when outputs use P-baskets (e.g., "p btms <assetId>").
-   * We extract token information from the outputs and prompt for authorization.
-   * 
-   * @param args The createAction arguments
-   * @param originator The app requesting the action
-   */
-  /**
-   * Handles createAction requests that involve BTMS P-baskets.
-   * 
    * SECURITY: This is the primary authorization checkpoint. User approval here
    * grants session authorization for subsequent createSignature calls.
    * 
@@ -387,28 +380,15 @@ export class BasicTokenModule implements PermissionsModule {
       throw new Error('Invalid createAction args')
     }
 
-    console.log('[BasicTokenModule.handleCreateAction] originator:', originator)
-    console.log('[BasicTokenModule.handleCreateAction] inputs:', args.inputs?.length ?? 0)
-    console.log('[BasicTokenModule.handleCreateAction] outputs:', args.outputs?.length ?? 0)
-    console.log('[BasicTokenModule.handleCreateAction] labels:', args.labels)
-    console.log('[BasicTokenModule.handleCreateAction] inputDescriptions:', (args.inputs || []).map(i => i?.inputDescription))
-    console.log('[BasicTokenModule.handleCreateAction] outputSummary:', (args.outputs || []).map(o => ({
-      basket: o?.basket,
-      outputDescription: o?.outputDescription,
-      hasLockingScript: !!o?.lockingScript
-    })))
-
     // Check if this is token issuance - auto-approve
     const isIssuance = this.isTokenIssuance(args)
     if (isIssuance) {
-      console.log('[BasicTokenModule.handleCreateAction] detected issuance - auto-approve')
       this.grantSessionAuthorization(originator)
       return
     }
 
     // No inputs = likely issuance (creating new tokens)
     if (!args.inputs || args.inputs.length === 0) {
-      console.log('[BasicTokenModule.handleCreateAction] no inputs - auto-approve')
       this.grantSessionAuthorization(originator)
       return
     }
@@ -441,39 +421,26 @@ export class BasicTokenModule implements PermissionsModule {
       }
     }
 
-    console.log('[BasicTokenModule.handleCreateAction] spendInfo:', enrichedSpendInfo)
+    const inputAmountReliable = enrichedSpendInfo.inputAmountSource === 'beef'
+    const burnAmount = inputAmountReliable
+      ? Math.max(
+        0,
+        enrichedSpendInfo.totalInputAmount
+        - enrichedSpendInfo.outputChangeAmount
+        - enrichedSpendInfo.outputSendAmount
+      )
+      : 0
 
-    // Prompt user with detailed token information if available
-    const hasMeltLabel = Array.isArray(args.labels)
-      && args.labels.some(label => typeof label === 'string' && label.includes('type melt'))
-
-    // Parse melt amount from action description (format: "Melt X tokens of ...")
-    // Note: input descriptions are encrypted, but action description is not
-    let meltAmount = 0
-    if (args.description && typeof args.description === 'string') {
-      const meltMatch = args.description.match(/Melt (\d+) tokens?/i)
-      if (meltMatch) {
-        const parsedAmount = parseInt(meltMatch[1], 10)
-        if (!isNaN(parsedAmount) && parsedAmount > 0) {
-          meltAmount = parsedAmount
-        }
-      }
+    if (burnAmount > 0 && enrichedSpendInfo.outputSendAmount > 0) {
+      throw new Error('Burn transactions must not send tokens to a recipient')
     }
-    console.log('[BasicTokenModule.handleCreateAction] description:', args.description)
 
-    const burnAmount = meltAmount > 0
-      ? meltAmount
-      : Math.max(0, enrichedSpendInfo.totalInputAmount - enrichedSpendInfo.changeAmount)
-    const isBurn = hasMeltLabel && burnAmount > 0
-
-    console.log('[BasicTokenModule.handleCreateAction] meltAmount:', meltAmount)
-    console.log('[BasicTokenModule.handleCreateAction] burnAmount:', burnAmount)
-    console.log('[BasicTokenModule.handleCreateAction] isBurn:', isBurn)
+    const isBurn = inputAmountReliable && burnAmount > 0 && enrichedSpendInfo.outputSendAmount === 0
 
     if (isBurn) {
       await this.promptForTokenBurn(originator, {
         ...enrichedSpendInfo,
-        sendAmount: burnAmount,
+        sendAmount: 0,
         totalInputAmount: burnAmount
       })
     } else if (enrichedSpendInfo.sendAmount > 0 || enrichedSpendInfo.totalInputAmount > 0) {
@@ -494,6 +461,13 @@ export class BasicTokenModule implements PermissionsModule {
     let sendAmount = 0
     let changeAmount = 0
     let totalInputAmount = 0
+    let outputSendAmount = 0
+    let outputChangeAmount = 0
+    let hasTokenOutputs = false
+    let inputAmountSource: TokenSpendInfo['inputAmountSource'] = 'none'
+    let inputAssetId: string | undefined
+    let outputAssetId: string | undefined
+    let assetIdMismatch = false
     let tokenName = 'BTMS Token'
     let assetId = ''
     let iconURL: string | undefined
@@ -517,19 +491,77 @@ export class BasicTokenModule implements PermissionsModule {
       }
     }
 
+    // Parse inputs using inputBEEF to get total input amount (if available)
+    let beefInputAmount = 0
+    if (args.inputBEEF && Array.isArray(args.inputs)) {
+      for (const input of args.inputs) {
+        if (!input?.outpoint || typeof input.outpoint !== 'string') continue
+        const [txid, voutStr] = input.outpoint.split('.')
+        const outputIndex = Number(voutStr)
+        if (!txid || !Number.isFinite(outputIndex) || outputIndex < 0) continue
+
+        try {
+          const tx = Transaction.fromBEEF(args.inputBEEF as number[], txid)
+          const lockingScript = tx.outputs?.[outputIndex]?.lockingScript
+          const scriptHex = lockingScript?.toHex?.()
+          if (!scriptHex) continue
+
+          const parsed = this.parseTokenLockingScript(scriptHex)
+          if (!parsed || parsed.assetId === ISSUE_MARKER) continue
+
+          if (!inputAssetId) {
+            inputAssetId = parsed.assetId
+          } else if (parsed.assetId !== inputAssetId) {
+            assetIdMismatch = true
+            continue
+          }
+
+          if (!assetId) {
+            assetId = parsed.assetId
+          } else if (parsed.assetId !== assetId) {
+            assetIdMismatch = true
+            continue
+          }
+
+          beefInputAmount += parsed.amount
+
+          if (parsed.metadata?.name && typeof parsed.metadata.name === 'string') {
+            tokenName = parsed.metadata.name
+          }
+          if (parsed.metadata?.iconURL && typeof parsed.metadata.iconURL === 'string') {
+            iconURL = parsed.metadata.iconURL
+          }
+        } catch {
+          // Ignore malformed input BEEF
+        }
+      }
+    }
+
+    if (beefInputAmount > 0) {
+      totalInputAmount = beefInputAmount
+      inputAmountSource = 'beef'
+    }
+
     // Parse input descriptions to get total input amount (if not encrypted)
-    // Format: "Spend {amount} tokens" or "Melt {amount} tokens" / "Input {amount} tokens for melt"
-    if (Array.isArray(args.inputs)) {
+    // Format: "Spend {amount} tokens" or "Burn {amount} tokens" / "Input {amount} tokens for burn"
+    if (inputAmountSource !== 'beef' && Array.isArray(args.inputs)) {
+      let descriptionInputAmount = 0
       for (const input of args.inputs) {
         if (input?.inputDescription && typeof input.inputDescription === 'string') {
           const spendMatch = input.inputDescription.match(/Spend (\d+) tokens?/i)
+          const burnMatch = input.inputDescription.match(/Burn (\d+) tokens?/i)
+          const burnInputMatch = input.inputDescription.match(/Input (\d+) tokens? for burn/i)
           const meltMatch = input.inputDescription.match(/Melt (\d+) tokens?/i)
           const meltInputMatch = input.inputDescription.match(/Input (\d+) tokens? for melt/i)
-          const parsedAmount = parseInt((spendMatch || meltMatch || meltInputMatch)?.[1] || '', 10)
+          const parsedAmount = parseInt((spendMatch || burnMatch || burnInputMatch || meltMatch || meltInputMatch)?.[1] || '', 10)
           if (!isNaN(parsedAmount) && parsedAmount > 0) {
-            totalInputAmount += parsedAmount
+            descriptionInputAmount += parsedAmount
           }
         }
+      }
+      if (descriptionInputAmount > 0) {
+        totalInputAmount = descriptionInputAmount
+        inputAmountSource = 'descriptions'
       }
     }
 
@@ -539,10 +571,25 @@ export class BasicTokenModule implements PermissionsModule {
         if (output?.lockingScript && typeof output.lockingScript === 'string') {
           const parsed = this.parseTokenLockingScript(output.lockingScript)
           if (parsed) {
-            // Get asset ID and metadata from first valid token
-            if (!assetId && parsed.assetId && parsed.assetId !== ISSUE_MARKER) {
-              assetId = parsed.assetId
+            if (parsed.assetId === ISSUE_MARKER) {
+              continue
             }
+            // Get asset ID from first valid token
+            if (!outputAssetId) {
+              outputAssetId = parsed.assetId
+            } else if (parsed.assetId !== outputAssetId) {
+              assetIdMismatch = true
+              continue
+            }
+
+            if (!assetId) {
+              assetId = parsed.assetId
+            } else if (parsed.assetId !== assetId) {
+              assetIdMismatch = true
+              continue
+            }
+
+            hasTokenOutputs = true
             if (parsed.metadata?.name && typeof parsed.metadata.name === 'string') {
               tokenName = parsed.metadata.name
             }
@@ -553,18 +600,28 @@ export class BasicTokenModule implements PermissionsModule {
             // Determine if this is a change output or send output
             // Basket presence indicates change (returning to self)
             if (output.basket && typeof output.basket === 'string' && output.basket.startsWith(P_BASKET_PREFIX)) {
-              changeAmount += parsed.amount
+              outputChangeAmount += parsed.amount
             } else {
-              sendAmount += parsed.amount
+              outputSendAmount += parsed.amount
             }
           }
         }
       }
     }
 
+    if (hasTokenOutputs) {
+      sendAmount = outputSendAmount
+      changeAmount = outputChangeAmount
+    }
+
+    if (assetIdMismatch || (inputAssetId && outputAssetId && inputAssetId !== outputAssetId)) {
+      throw new Error('Asset swap support coming soon')
+    }
+
     // If we have token outputs, derive total input amount from them
     if (sendAmount + changeAmount > 0 && totalInputAmount === 0) {
       totalInputAmount = sendAmount + changeAmount
+      inputAmountSource = 'derived'
     }
 
     // If we still couldn't determine send amount, try calculating from inputs
@@ -576,6 +633,10 @@ export class BasicTokenModule implements PermissionsModule {
       sendAmount,
       totalInputAmount,
       changeAmount,
+      outputSendAmount,
+      outputChangeAmount,
+      hasTokenOutputs,
+      inputAmountSource,
       tokenName,
       assetId,
       recipient,
@@ -584,9 +645,6 @@ export class BasicTokenModule implements PermissionsModule {
     }
   }
 
-  /**
-   * Prompts user for token spend authorization with comprehensive details.
-   */
   /**
    * Prompts user for token spend authorization with detailed information.
    * 
@@ -629,7 +687,7 @@ export class BasicTokenModule implements PermissionsModule {
   }
 
   /**
-   * Prompts user for token burn authorization (melt all inputs, no outputs).
+   * Prompts user for token burn authorization (burns all inputs with no token outputs).
    */
   private async promptForTokenBurn(originator: string, spendInfo: TokenSpendInfo): Promise<void> {
     // Input validation
@@ -646,7 +704,7 @@ export class BasicTokenModule implements PermissionsModule {
       tokenName: spendInfo.tokenName,
       assetId: spendInfo.assetId,
       iconURL: spendInfo.iconURL,
-      burnAll: spendInfo.totalInputAmount === 0
+      burnAll: spendInfo.changeAmount === 0
     }
 
     const message = JSON.stringify(promptData)
@@ -659,9 +717,6 @@ export class BasicTokenModule implements PermissionsModule {
     this.grantSessionAuthorization(originator)
   }
 
-  /**
-   * Prompts user for generic authorization when we can't determine token details.
-   */
   /**
    * Prompts user for generic authorization when token details cannot be parsed.
    * 
@@ -1094,7 +1149,7 @@ export class BasicTokenModule implements PermissionsModule {
    * Checks if the createAction is for token issuance.
    * 
    * ISSUANCE DETECTION: Token issuance is detected by:
-   * 1. Output tags containing 'btms_issue'
+   * 1. Output tags containing 'btms_type_issue'
    * 2. Locking script contains ISSUE_MARKER in assetId field
    * 
    * @param args - createAction arguments
@@ -1110,8 +1165,8 @@ export class BasicTokenModule implements PermissionsModule {
         continue
       }
 
-      // Check for btms_issue tag
-      if (Array.isArray(output.tags) && output.tags.includes('btms_issue')) {
+      // Check for btms_type_issue tag
+      if (Array.isArray(output.tags) && output.tags.includes('btms_type_issue')) {
         return true
       }
 

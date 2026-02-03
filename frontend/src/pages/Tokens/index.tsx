@@ -31,6 +31,12 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { Img } from '@bsv/uhrp-react'
 import SortIcon from '@mui/icons-material/Sort'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
+import SendIcon from '@mui/icons-material/Send'
+import CallReceivedIcon from '@mui/icons-material/CallReceived'
+import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
+import TrendingDownIcon from '@mui/icons-material/TrendingDown'
 import { IdentityCard } from '@bsv/identity-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts'
 import { toast } from 'react-toastify'
@@ -102,14 +108,15 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
-  const [balanceHistory, setBalanceHistory] = useState<Array<{ date: string; balance: number }>>([])
+  const [balanceHistory, setBalanceHistory] = useState<Array<{ date: string; balance: number; timestamp: number }>>([])
 
   // Calculate balance history from transactions
   const calculateBalanceHistory = (txs: TokenTransaction[], currentBalance: number) => {
+    const normalizedCurrentBalance = Number(currentBalance) || 0
     if (txs.length === 0) {
       return [{
         date: new Date().toLocaleDateString(),
-        balance: currentBalance,
+        balance: normalizedCurrentBalance,
         timestamp: Date.now()
       }]
     }
@@ -121,18 +128,9 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     let runningBalance = 0
     const history: Array<{ date: string; balance: number; timestamp: number }> = []
 
-    // Add starting point at 0
-    if (sorted.length > 0 && sorted[0].timestamp) {
-      history.push({
-        date: new Date(sorted[0].timestamp).toLocaleDateString(),
-        balance: 0,
-        timestamp: sorted[0].timestamp - 1
-      })
-    }
-
     // Work forward through transactions, applying each one
     for (const tx of sorted) {
-      runningBalance += tx.amount
+      runningBalance += Number(tx.amount) || 0
 
       history.push({
         date: tx.timestamp ? new Date(tx.timestamp).toLocaleDateString() : 'Unknown',
@@ -142,10 +140,10 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     }
 
     // Add current point if it's different from last transaction
-    if (history.length > 0 && history[history.length - 1].balance !== currentBalance) {
+    if (history.length > 0 && history[history.length - 1].balance !== normalizedCurrentBalance) {
       history.push({
         date: new Date().toLocaleDateString(),
-        balance: currentBalance,
+        balance: normalizedCurrentBalance,
         timestamp: Date.now()
       })
     }
@@ -321,9 +319,33 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                 </Typography>
               </Box>
 
-              <Typography variant="h3" sx={{ fontWeight: 700, mb: 3 }}>
+              <Typography variant="h3" sx={{ fontWeight: 700, mb: 1 }}>
                 {tokenBalance} units
               </Typography>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2 }}>
+                <Tooltip title={token.assetId}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>
+                    {token.assetId.slice(0, 8)}...{token.assetId.slice(-8)}
+                  </Typography>
+                </Tooltip>
+                <Tooltip title="Copy Asset ID">
+                  <IconButton
+                    size="small"
+                    sx={{ padding: '2px' }}
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(token.assetId)
+                        toast.success('Asset ID copied')
+                      } catch (error) {
+                        toast.error('Failed to copy Asset ID')
+                      }
+                    }}
+                  >
+                    <ContentCopyIcon sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
 
               <Box sx={{ display: 'flex', gap: 1.5 }}>
                 <Send assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
@@ -365,27 +387,33 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                     <XAxis
-                      dataKey="date"
+                      dataKey="timestamp"
                       tick={{ fontSize: 10, fill: '#666' }}
                       stroke="#bdbdbd"
                       tickLine={false}
+                      type="number"
+                      domain={['dataMin', 'dataMax']}
+                      tickFormatter={(value: number) => new Date(value).toLocaleDateString()}
                     />
                     <YAxis
                       tick={{ fontSize: 10, fill: '#666' }}
                       stroke="#bdbdbd"
                       tickLine={false}
                       axisLine={false}
+                      domain={[0, 'auto']}
                     />
                     <ChartTooltip
                       contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc' }}
                       formatter={(value: number) => [`${value} units`, 'Balance']}
+                      labelFormatter={(label: number) => new Date(label).toLocaleDateString()}
                     />
                     <Line
                       type="monotone"
                       dataKey="balance"
                       stroke="#06b6d4"
                       strokeWidth={2}
-                      dot={false}
+                      dot={{ fill: '#06b6d4', strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6 }}
                       fill="url(#colorBalance)"
                     />
                   </LineChart>
@@ -450,6 +478,15 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                       : tx.type === 'receive' ? 'Received'
                         : tx.type === 'melt' ? 'Melted'
                           : tx.direction === 'incoming' ? 'Received' : 'Sent'
+
+                  const getTypeIcon = () => {
+                    if (tx.type === 'issue') return <AddCircleOutlineIcon sx={{ fontSize: 16 }} />
+                    if (tx.type === 'send') return <SendIcon sx={{ fontSize: 16 }} />
+                    if (tx.type === 'receive') return <CallReceivedIcon sx={{ fontSize: 16 }} />
+                    if (tx.type === 'melt') return <LocalFireDepartmentIcon sx={{ fontSize: 16 }} />
+                    return tx.direction === 'incoming' ? <CallReceivedIcon sx={{ fontSize: 16 }} /> : <SendIcon sx={{ fontSize: 16 }} />
+                  }
+
                   const txidLabel = shortTxid(tx.txid)
                   const wocUrl = `${WOC_BASE_URL}${tx.txid}`
 
@@ -459,21 +496,26 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                         {formatDate(tx)}
                       </TableCell>
                       <TableCell align="left">
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                           <Chip
+                            icon={getTypeIcon()}
                             label={typeLabel}
                             size="small"
-                            color={isCredit ? 'success' : 'error'}
-                            sx={{ minWidth: 70 }}
+                            color={isCredit ? 'success' : (tx.type === 'send' || (tx.direction === 'outgoing' && tx.type !== 'melt')) ? 'warning' : 'error'}
+                            sx={{ minWidth: 90, fontWeight: 500 }}
                           />
-                          <Typography
-                            sx={{
-                              fontWeight: 600,
-                              color: isCredit ? 'success.main' : 'error.main'
-                            }}
-                          >
-                            {isCredit ? '+' : ''}{tx.amount}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            {isCredit ? <TrendingUpIcon sx={{ fontSize: 18, color: 'success.main' }} /> : <TrendingDownIcon sx={{ fontSize: 18, color: 'error.main' }} />}
+                            <Typography
+                              sx={{
+                                fontWeight: 600,
+                                color: isCredit ? 'success.main' : 'error.main',
+                                fontSize: '0.95rem'
+                              }}
+                            >
+                              {isCredit ? '+' : ''}{tx.amount}
+                            </Typography>
+                          </Box>
                         </Box>
                       </TableCell>
                       <TableCell align="right">

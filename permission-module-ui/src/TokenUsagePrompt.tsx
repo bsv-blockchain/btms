@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -13,19 +13,23 @@ import {
   IconButton,
   Tooltip
 } from '@mui/material'
+import type { PaletteMode } from '@mui/material'
 import TokenIcon from '@mui/icons-material/Token'
 import AppsIcon from '@mui/icons-material/Apps'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import SendIcon from '@mui/icons-material/Send'
 import PersonIcon from '@mui/icons-material/Person'
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
+import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { Img } from '@bsv/uhrp-react'
+import { useTheme } from '@mui/material/styles'
 
 interface TokenUsagePromptProps {
   app: string
   message: string
   onAllow: () => void
   onDeny: () => void
+  paletteMode?: PaletteMode
 }
 
 /**
@@ -115,6 +119,149 @@ const truncateHex = (hex: string, startChars = 8, endChars = 6): string => {
   return `${hex.slice(0, startChars)}...${hex.slice(-endChars)}`
 }
 
+const normalizeAppLabel = (rawLabel: string): string => {
+  let label = rawLabel
+  if (label.startsWith('babbage_app_')) {
+    label = label.substring(12)
+  }
+  if (label.startsWith('https://')) {
+    label = label.substring(8)
+  }
+  if (label.startsWith('http://')) {
+    label = label.substring(7)
+  }
+  return label
+}
+
+const resolveAppBaseUrl = (label: string): string => {
+  return label.startsWith('localhost:') ? `http://${label}` : `https://${label}`
+}
+
+const AppOriginChip: React.FC<{ app: string; size?: 'default' | 'compact'; paletteMode?: PaletteMode }> = ({
+  app,
+  size = 'default',
+  paletteMode
+}) => {
+  const theme = useTheme()
+  const resolvedMode = paletteMode ?? theme.palette.mode
+  const normalizedLabel = useMemo(() => normalizeAppLabel(app), [app])
+  const [displayName, setDisplayName] = useState(normalizedLabel)
+  const [iconUrl, setIconUrl] = useState<string | undefined>(undefined)
+  const chipHeight = size === 'compact' ? 38 : 44
+  const avatarSize = size === 'compact' ? 28 : 32
+  const maxLabelWidth = size === 'compact' ? 150 : 180
+  const chipBg = resolvedMode === 'dark'
+    ? 'rgba(255, 255, 255, 0.08)'
+    : 'rgba(0, 0, 0, 0.06)'
+  const chipBorder = resolvedMode === 'dark'
+    ? '1px solid rgba(255, 255, 255, 0.18)'
+    : '1px solid rgba(0, 0, 0, 0.12)'
+  const avatarBg = resolvedMode === 'dark'
+    ? 'rgba(255, 255, 255, 0.12)'
+    : 'rgba(0, 0, 0, 0.08)'
+  const titleColor = resolvedMode === 'dark'
+    ? 'rgba(255, 255, 255, 0.92)'
+    : 'rgba(0, 0, 0, 0.82)'
+  const subtitleColor = resolvedMode === 'dark'
+    ? 'rgba(255, 255, 255, 0.6)'
+    : 'rgba(0, 0, 0, 0.55)'
+
+  useEffect(() => {
+    let cancelled = false
+    const baseUrl = resolveAppBaseUrl(normalizedLabel)
+
+    setDisplayName(normalizedLabel)
+    setIconUrl(`${baseUrl}/favicon.ico`)
+
+    const loadManifest = async () => {
+      try {
+        const response = await fetch(`${baseUrl}/manifest.json`)
+        if (!response.ok) return
+        const manifest = await response.json()
+        if (cancelled) return
+
+        if (manifest?.name) {
+          setDisplayName(manifest.name)
+        }
+        if (Array.isArray(manifest?.icons) && manifest.icons.length > 0) {
+          const iconSrc = manifest.icons[0]?.src
+          if (typeof iconSrc === 'string') {
+            const resolvedIcon = iconSrc.startsWith('http')
+              ? iconSrc
+              : `${baseUrl}${iconSrc.startsWith('/') ? '' : '/'}${iconSrc}`
+            setIconUrl(resolvedIcon)
+          }
+        }
+      } catch {
+        // Ignore manifest lookup errors
+      }
+    }
+
+    void loadManifest()
+
+    return () => {
+      cancelled = true
+    }
+  }, [normalizedLabel])
+
+  return (
+    <Chip
+      sx={{
+        height: chipHeight,
+        px: 1,
+        borderRadius: 999,
+        bgcolor: chipBg,
+        border: chipBorder,
+        maxWidth: '100%',
+        color: titleColor
+      }}
+      icon={(
+        <Avatar sx={{ width: avatarSize, height: avatarSize, bgcolor: avatarBg }}>
+          {iconUrl ? (
+            <Img
+              src={iconUrl}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <AppsIcon sx={{ fontSize: 18, color: titleColor }} />
+          )}
+        </Avatar>
+      )}
+      label={(
+        <Stack spacing={0} sx={{ minWidth: 0 }}>
+          <Typography
+            variant={size === 'compact' ? 'caption' : 'body2'}
+            sx={{
+              fontWeight: 600,
+              maxWidth: maxLabelWidth,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: titleColor
+            }}
+          >
+            {displayName}
+          </Typography>
+          {displayName !== normalizedLabel && (
+            <Typography
+              variant="caption"
+              sx={{
+                maxWidth: maxLabelWidth,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: subtitleColor
+              }}
+            >
+              {normalizedLabel}
+            </Typography>
+          )}
+        </Stack>
+      )}
+    />
+  )
+}
+
 /**
  * Modal dialog for prompting user to approve BTMS token operations.
  * Displays comprehensive token information in an elegant, user-friendly format.
@@ -124,10 +271,21 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
   app,
   message,
   onAllow,
-  onDeny
+  onDeny,
+  paletteMode
 }) => {
+  const theme = useTheme()
   const promptInfo = useMemo(() => parseTokenMessage(message), [message])
   const [copied, setCopied] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
+  const resolvedMode = paletteMode ?? theme.palette.mode
+  const isDarkMode = resolvedMode === 'dark'
+  const dialogBg = isDarkMode ? '#1a1d29' : '#f5f6fb'
+  const panelBg = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(17, 24, 39, 0.06)'
+  const textPrimary = isDarkMode ? 'rgba(255, 255, 255, 0.92)' : 'rgba(17, 24, 39, 0.92)'
+  const textSecondary = isDarkMode ? 'rgba(255, 255, 255, 0.72)' : 'rgba(55, 65, 81, 0.75)'
+  const textMuted = isDarkMode ? 'rgba(255, 255, 255, 0.6)' : 'rgba(55, 65, 81, 0.6)'
+  const borderSoft = isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)'
 
   const handleCopyAssetId = useCallback(() => {
     if (promptInfo?.assetId) {
@@ -141,68 +299,17 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
     return null
   }
 
-  const renderTokenSummary = () => {
-    if (promptInfo.type === 'btms_spend') return null
-
-    const tokenName = 'tokenName' in promptInfo ? (promptInfo.tokenName || 'Tokens') : 'Tokens'
-    const scopeLabel = promptInfo.assetId
-      ? `Token ID: ${truncateHex(promptInfo.assetId, 12, 8)}`
-      : 'Token scope: all tokens'
-    const iconURL = 'iconURL' in promptInfo ? promptInfo.iconURL : undefined
-
-    return (
-      <Stack spacing={1.5} alignItems="center" sx={{ mt: 2 }}>
-        {iconURL ? (
-          <Box sx={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            overflow: 'hidden',
-            bgcolor: 'rgba(255, 255, 255, 0.08)'
-          }}>
-            <Img
-              src={iconURL}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          </Box>
-        ) : (
-          <Avatar
-            sx={{
-              width: 56,
-              height: 56,
-              bgcolor: 'rgba(255, 255, 255, 0.08)'
-            }}
-          >
-            <TokenIcon sx={{ fontSize: 28, color: 'white' }} />
-          </Avatar>
-        )}
-        <Typography variant="subtitle1" fontWeight={600}>
-          {tokenName}
-        </Typography>
-        <Chip
-          label={scopeLabel}
-          sx={{
-            bgcolor: 'rgba(255, 255, 255, 0.08)',
-            color: 'rgba(255, 255, 255, 0.8)',
-            fontFamily: 'monospace',
-            maxWidth: '100%'
-          }}
-        />
-      </Stack>
-    )
-  }
-
   // Determine title and icon based on prompt type
   const getTitle = () => {
-    if (promptInfo.type === 'btms_spend') return 'Spend Authorization Request'
-    if (promptInfo.type === 'btms_burn') return 'Burn Authorization Request'
+    if (promptInfo.type === 'btms_spend') return 'Token Spend Request'
+    if (promptInfo.type === 'btms_burn') return 'Token Burn Request'
     if (promptInfo.type === 'btms_access') return 'Token Access Request'
     return 'Authorization Request'
   }
 
   const getIcon = () => {
     if (promptInfo.type === 'btms_spend') return <SendIcon sx={{ fontSize: 40, color: 'white' }} />
-    if (promptInfo.type === 'btms_burn') return <SwapHorizIcon sx={{ fontSize: 40, color: 'white' }} />
+    if (promptInfo.type === 'btms_burn') return <LocalFireDepartmentIcon sx={{ fontSize: 40, color: 'white' }} />
     return <TokenIcon sx={{ fontSize: 40, color: 'white' }} />
   }
 
@@ -210,14 +317,15 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
     if (promptInfo.type === 'btms_spend') {
       const spendInfo = promptInfo as BTMSSpendInfo
       return (
-        <>
-          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
-            Authorize <strong>{app}</strong> to spend
+        <Stack spacing={1.5} alignItems="center">
+          <Typography variant="body1" sx={{ color: textPrimary, lineHeight: 1.6 }}>
+            Authorize this app to spend
           </Typography>
-          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
+          <AppOriginChip app={app} paletteMode={resolvedMode} />
+          <Typography variant="h6" fontWeight="bold" sx={{ mt: 0.5 }}>
             {formatAmount(spendInfo.sendAmount)} {spendInfo.tokenName} tokens
           </Typography>
-        </>
+        </Stack>
       )
     }
 
@@ -225,31 +333,64 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
       const burnInfo = promptInfo as BTMSBurnInfo
       const isBurnAll = burnInfo.burnAll || burnInfo.burnAmount === 0
       return (
-        <>
-          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
-            Authorize <strong>{app}</strong> to burn tokens
+        <Stack spacing={1.5} alignItems="center">
+          <Typography variant="body1" sx={{ color: textPrimary, lineHeight: 1.6 }}>
+            Authorize this app to burn tokens
           </Typography>
-          <Typography variant="h6" fontWeight="bold" sx={{ mt: 1 }}>
+          <AppOriginChip app={app} paletteMode={resolvedMode} />
+          <Typography variant="h6" fontWeight="bold" sx={{ mt: 0.5 }}>
             {isBurnAll
               ? `All ${burnInfo.tokenName} tokens`
               : `${formatAmount(burnInfo.burnAmount)} ${burnInfo.tokenName} tokens`}
           </Typography>
-        </>
+          <Typography variant="body2" sx={{ color: textSecondary }}>
+            Burned tokens cannot be recovered.
+          </Typography>
+        </Stack>
       )
     }
 
     if (promptInfo.type === 'btms_access') {
+      const accessChipBg = resolvedMode === 'dark'
+        ? 'rgba(255, 255, 255, 0.06)'
+        : 'rgba(0, 0, 0, 0.05)'
+      const accessChipBorder = resolvedMode === 'dark'
+        ? '1px solid rgba(255, 255, 255, 0.14)'
+        : '1px solid rgba(0, 0, 0, 0.12)'
+      const accessChipText = resolvedMode === 'dark'
+        ? 'rgba(255, 255, 255, 0.9)'
+        : 'rgba(0, 0, 0, 0.82)'
       return (
-        <>
-          <Typography variant="body1" sx={{ color: 'rgba(255, 255, 255, 0.9)', lineHeight: 1.6 }}>
-            Authorize <strong>{app}</strong> to access your BTMS tokens
+        <Stack spacing={2} alignItems="center">
+          <Typography variant="body1" sx={{ color: textPrimary, lineHeight: 1.6 }}>
+            Authorize this app to access your BTMS tokens
           </Typography>
-          <Typography variant="body2" sx={{ mt: 1.5, color: 'rgba(255, 255, 255, 0.7)' }}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <AppOriginChip app={app} size="compact" paletteMode={resolvedMode} />
+            <ArrowForwardIcon sx={{ color: textMuted }} />
+            <Chip
+              icon={<TokenIcon sx={{ color: accessChipText }} />}
+              label="BTMS Tokens"
+              sx={{
+                height: 38,
+                px: 0.75,
+                borderRadius: 999,
+                bgcolor: accessChipBg,
+                border: accessChipBorder,
+                color: accessChipText,
+                fontWeight: 600,
+                '& .MuiChip-icon': {
+                  color: accessChipText
+                }
+              }}
+            />
+          </Stack>
+          <Typography variant="body2" sx={{ color: textSecondary }}>
             {promptInfo.assetId
-              ? `Token ID: ${truncateHex(promptInfo.assetId, 12, 8)}`
+              ? `Token scope: ${truncateHex(promptInfo.assetId, 12, 8)}`
               : 'Token scope: all tokens'}
           </Typography>
-        </>
+        </Stack>
       )
     }
 
@@ -265,62 +406,66 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
       PaperProps={{
         sx: {
           borderRadius: 3,
-          bgcolor: '#1a1d29',
-          color: 'white'
+          bgcolor: dialogBg,
+          color: textPrimary
         }
       }}
     >
       <DialogContent sx={{ p: 4, textAlign: 'center' }}>
-        <Typography variant="h5" fontWeight="bold" sx={{ mb: 4 }}>
+        <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
           {getTitle()}
         </Typography>
 
         <Box sx={{
-          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+          backgroundColor: panelBg,
           borderRadius: 3,
           p: 4,
           mb: 3
         }}>
           {/* Token Icon */}
-          {promptInfo.type === 'btms_spend' && (promptInfo as BTMSSpendInfo).iconURL ? (
-            <Box sx={{
-              width: 80,
-              height: 80,
-              mx: 'auto',
-              mb: 3,
-              borderRadius: '50%',
-              overflow: 'hidden',
-              bgcolor: 'rgba(255, 255, 255, 0.1)'
-            }}>
-              <Img
-                src={(promptInfo as BTMSSpendInfo).iconURL!}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            </Box>
-          ) : (
-            <Avatar sx={{
-              width: 80,
-              height: 80,
-              mx: 'auto',
-              mb: 3,
-              bgcolor: 'rgba(255, 255, 255, 0.1)'
-            }}>
-              {getIcon()}
-            </Avatar>
-          )}
+          {(() => {
+            const iconURL = promptInfo.type !== 'btms_access'
+              ? (promptInfo as BTMSSpendInfo | BTMSBurnInfo).iconURL
+              : undefined
+
+            return iconURL ? (
+              <Box sx={{
+                width: 80,
+                height: 80,
+                mx: 'auto',
+                mb: 3,
+                borderRadius: '50%',
+                overflow: 'hidden',
+                bgcolor: 'rgba(255, 255, 255, 0.1)'
+              }}>
+                <Img
+                  src={iconURL}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              </Box>
+            ) : (
+              <Avatar sx={{
+                width: 80,
+                height: 80,
+                mx: 'auto',
+                mb: 3,
+                bgcolor: 'rgba(255, 255, 255, 0.1)'
+              }}>
+                {getIcon()}
+              </Avatar>
+            )
+          })()}
 
           {/* Authorization Message */}
           {getActionText()}
 
-          {renderTokenSummary()}
-
           {/* Asset ID */}
-          {promptInfo.assetId && (
+          {promptInfo.type !== 'btms_access' && promptInfo.assetId && (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1.5 }}>
               <Typography
                 variant="caption"
                 sx={{
-                  color: 'rgba(255, 255, 255, 0.6)',
+                  color: textMuted,
                   fontFamily: 'monospace',
                   fontSize: '0.75rem'
                 }}
@@ -332,11 +477,13 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
                   onClick={handleCopyAssetId}
                   size="small"
                   sx={{
-                    color: 'rgba(255, 255, 255, 0.6)',
+                    color: textMuted,
                     padding: '4px',
                     '&:hover': {
-                      color: 'rgba(255, 255, 255, 0.9)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                      color: textPrimary,
+                      backgroundColor: isDarkMode
+                        ? 'rgba(255, 255, 255, 0.1)'
+                        : 'rgba(0, 0, 0, 0.08)'
                     }
                   }}
                 >
@@ -358,18 +505,18 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
             borderRadius: 999,
             py: 1,
             borderWidth: 2,
-            borderColor: 'rgba(255, 255, 255, 0.3)',
-            color: 'rgba(255, 255, 255, 0.9)',
+            borderColor: borderSoft,
+            color: textPrimary,
             textTransform: 'none',
             fontWeight: 600,
             '&:hover': {
-              borderColor: 'rgba(255, 255, 255, 0.5)',
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.35)',
+              backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)',
               transform: 'translateY(-1px)'
             }
           }}
         >
-          Deny
+          {promptInfo.type === 'btms_burn' ? 'Cancel' : 'Deny'}
         </Button>
         <Button
           onClick={onAllow}
@@ -392,7 +539,7 @@ const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
             }
           }}
         >
-          Approve
+          {promptInfo.type === 'btms_burn' ? 'Confirm Burn' : 'Approve'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -421,9 +568,10 @@ export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
     app: string
     message: string
     resolver: (value: boolean) => void
+    paletteMode?: PaletteMode
   } | null>(null)
 
-  const promptUser = useCallback(async (app: string, message: string): Promise<boolean> => {
+  const promptUser = useCallback(async (app: string, message: string, paletteMode?: PaletteMode): Promise<boolean> => {
     // Request focus before showing the prompt (if handlers provided)
     if (focusHandlers) {
       const currentlyFocused = await focusHandlers.isFocused()
@@ -434,7 +582,7 @@ export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
     }
 
     return new Promise((resolve) => {
-      setPromptState({ app, message, resolver: resolve })
+      setPromptState({ app, message, resolver: resolve, paletteMode })
     })
   }, [focusHandlers])
 
@@ -469,6 +617,7 @@ export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
         message={promptState.message}
         onAllow={handleAllow}
         onDeny={handleDeny}
+        paletteMode={promptState.paletteMode}
       />
     )
   }, [promptState, handleAllow, handleDeny])
