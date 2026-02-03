@@ -478,19 +478,6 @@ export class BasicTokenModule implements PermissionsModule {
       throw new Error('Invalid args for extractTokenSpendInfo')
     }
 
-    // Parse action description for send amount and recipient (if not encrypted)
-    // Format: "Send {amount} tokens to {recipient.slice(0, 8)}..."
-    if (args.description && typeof args.description === 'string') {
-      const sendMatch = args.description.match(/Send (\d+) tokens? to ([a-fA-F0-9]+)/i)
-      if (sendMatch) {
-        const parsedAmount = parseInt(sendMatch[1], 10)
-        if (!isNaN(parsedAmount) && parsedAmount > 0) {
-          sendAmount = parsedAmount
-          recipient = sendMatch[2]
-        }
-      }
-    }
-
     // Parse inputs using inputBEEF to get total input amount (if available)
     let beefInputAmount = 0
     if (args.inputBEEF && Array.isArray(args.inputs)) {
@@ -540,27 +527,6 @@ export class BasicTokenModule implements PermissionsModule {
     if (beefInputAmount > 0) {
       totalInputAmount = beefInputAmount
       inputAmountSource = 'beef'
-    }
-
-    // Parse input descriptions to get total input amount (if not encrypted)
-    // Format: "Spend {amount} tokens" or "Burn {amount} tokens" / "Input {amount} tokens for burn"
-    if (inputAmountSource !== 'beef' && Array.isArray(args.inputs)) {
-      let descriptionInputAmount = 0
-      for (const input of args.inputs) {
-        if (input?.inputDescription && typeof input.inputDescription === 'string') {
-          const spendMatch = input.inputDescription.match(/Spend (\d+) tokens?/i)
-          const burnMatch = input.inputDescription.match(/Burn (\d+) tokens?/i)
-          const burnInputMatch = input.inputDescription.match(/Input (\d+) tokens? for burn/i)
-          const parsedAmount = parseInt((spendMatch || burnMatch || burnInputMatch)?.[1] || '', 10)
-          if (!isNaN(parsedAmount) && parsedAmount > 0) {
-            descriptionInputAmount += parsedAmount
-          }
-        }
-      }
-      if (descriptionInputAmount > 0) {
-        totalInputAmount = descriptionInputAmount
-        inputAmountSource = 'descriptions'
-      }
     }
 
     // Parse ALL output locking scripts to extract token metadata
