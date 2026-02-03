@@ -97,7 +97,7 @@ export interface BTMSTransaction {
   /** Transaction ID */
   txid: TXIDHexString
   /** Transaction type */
-  type: 'issue' | 'send' | 'receive' | 'melt'
+  type: 'issue' | 'send' | 'receive' | 'burn'
   /** Transaction direction from user's perspective */
   direction: 'incoming' | 'outgoing'
   /** Token amount involved */
@@ -405,17 +405,17 @@ export interface AcceptResult {
 }
 
 /**
- * Result of a token melt (burn) operation
+ * Result of a token burn operation
  */
-export interface MeltResult {
+export interface BurnResult {
   /** Whether the operation succeeded */
   success: boolean
   /** Transaction ID */
   txid: TXIDHexString
-  /** Asset ID that was melted */
+  /** Asset ID that was burned */
   assetId: string
-  /** Amount of tokens melted (destroyed) */
-  amountMelted: number
+  /** Amount of tokens burned (destroyed) */
+  amountBurned: number
   /** Error message if failed */
   error?: string
 }

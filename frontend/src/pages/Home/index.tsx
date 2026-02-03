@@ -208,9 +208,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
               <Button component={Link} to="/mint" variant="contained" color="primary">
                 Issue New Asset
               </Button>
-              <Button component={Link} to="/mint" variant="outlined" color="secondary">
-                Upload Inventory
-              </Button>
             </Box>
           </Grid>
           <Grid item xs={12} md={5}>
@@ -240,11 +237,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
             <Typography variant="h4" sx={{ fontWeight: 700 }}>
               My Assets
             </Typography>
-          </Grid>
-          <Grid item>
-            <Button component={Link} to="/mint" variant="outlined" color="secondary">
-              + Issue Asset
-            </Button>
           </Grid>
         </Grid>
 

@@ -54,7 +54,7 @@ import type {
   ChangeContext,
   ChangeOutput,
   CommsLayer,
-  MeltResult,
+  BurnResult,
   BTMSTransaction,
   GetTransactionsResult
 } from './types.js'
@@ -79,7 +79,7 @@ import {
  * const btms = new BTMS()
  * 
  * // Issue new tokens
- * const result = await btms.issue('GOLD', 1000, { description: 'A test token' })
+ * const result = await btms.issue(1000, { name: 'GOLD', description: 'A test token' })
  * console.log('Asset ID:', result.assetId)
  * 
  * // Check balance
@@ -148,7 +148,7 @@ export class BTMS {
    * const result = await btms.issue(1000000, {
    *   name: 'GOLD',
    *   description: 'Represents 1 gram of gold',
-   *   iconURL: 'https://example.com/gold.png' or a UHRP url
+   *   iconURL: 'https://example.com/gold.png' // or a UHRP url
    * })
    * console.log('Asset ID:', result.assetId) // e.g., 'abc123...def.0'
    * ```
@@ -528,7 +528,7 @@ export class BTMS {
     assetId: string,
     amount?: number,
     options: { changeStrategy?: ChangeStrategyOptions } = {}
-  ): Promise<MeltResult> {
+  ): Promise<BurnResult> {
     try {
       // Validate inputs
       if (!BTMSToken.isValidAssetId(assetId)) {
@@ -627,7 +627,7 @@ export class BTMS {
       const createArgs: CreateActionArgs = {
         description: `Burn ${amountToBurn} tokens of ${assetId.slice(0, 8)}...`,
         labels: [
-          `${BTMS_LABEL_PREFIX}type melt` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}type burn` as LabelStringUnder300Bytes,
           `${BTMS_LABEL_PREFIX}direction incoming` as LabelStringUnder300Bytes,
           timestampLabel,
           monthLabel,
@@ -658,7 +658,7 @@ export class BTMS {
           success: true,
           txid,
           assetId,
-          amountMelted: amountToBurn
+          amountBurned: amountToBurn
         }
       } catch (broadcastError: any) {
         // When burning all tokens (no outputs), overlay won't admit/retain anything
@@ -686,7 +686,7 @@ export class BTMS {
             success: true,
             txid,
             assetId,
-            amountMelted: amountToBurn
+            amountBurned: amountToBurn
           }
         }
 
@@ -698,7 +698,7 @@ export class BTMS {
         success: false,
         txid: '' as TXIDHexString,
         assetId,
-        amountMelted: 0,
+        amountBurned: 0,
         error: error instanceof Error ? error.message : 'Unknown error'
       }
     }
@@ -1094,7 +1094,7 @@ export class BTMS {
           ? label.slice(BTMS_LABEL_PREFIX.length)
           : label
       )
-      let type: 'issue' | 'send' | 'receive' | 'melt' = 'send'
+      let type: 'issue' | 'send' | 'receive' | 'burn' = 'send'
       let direction: 'incoming' | 'outgoing' = 'outgoing'
       let counterparty: PubKeyHex | undefined
 
@@ -1105,11 +1105,11 @@ export class BTMS {
         type = 'send'
       } else if (labelPayloads.some(l => l.includes('type receive'))) {
         type = 'receive'
-      } else if (labelPayloads.some(l => l.includes('type melt'))) {
-        type = 'melt'
+      } else if (labelPayloads.some(l => l.includes('type burn'))) {
+        type = 'burn'
       }
 
-      direction = (type === 'send' || type === 'melt') ? 'outgoing' : 'incoming'
+      direction = (type === 'send' || type === 'burn') ? 'outgoing' : 'incoming'
 
       // Extract counterparty from labels
       const counterpartyLabel = labelPayloads.find(l => l.startsWith('counterparty '))
@@ -1168,7 +1168,7 @@ export class BTMS {
           }
           amount = inputAmount - changeAmount
         }
-      } else if (type === 'melt') {
+      } else if (type === 'burn') {
         let inputAmount = 0
         if (action.inputs) {
           for (const input of action.inputs) {

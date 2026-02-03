@@ -83,7 +83,7 @@ export type {
   IssueResult,
   SendResult,
   AcceptResult,
-  MeltResult,
+  BurnResult,
 
   // Configuration types
   BTMSConfig,
