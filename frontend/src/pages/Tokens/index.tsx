@@ -43,10 +43,9 @@ import { toast } from 'react-toastify'
 import useStyles from './tokens-style'
 import Send from '../../components/Send'
 import Receive from '../../components/Receive'
-import Melt from '../../components/Melt'
+import Burn from '../../components/Burn'
 import { SatoshiValue, TXIDHexString, WalletCounterparty } from '@bsv/sdk'
 import { Asset, btms } from '../../btms'
-import { logWithTimestamp } from '../../utils/logging'
 
 interface TokensProps {
   match: {
@@ -62,22 +61,12 @@ interface TokenTransaction {
   amount: number
   txid: TXIDHexString
   counterparty: string
-  type?: 'issue' | 'send' | 'receive' | 'melt'
+  type?: 'issue' | 'send' | 'receive' | 'burn'
   direction?: 'incoming' | 'outgoing'
   status?: string
 }
 
-const TOKENS_DEBUG = true
-
-const TOKENS_SOURCE_TAG = 'frontend/src/btms/index.ts@debug-hmr-39'
 const WOC_BASE_URL = 'https://whatsonchain.com/tx/'
-
-function tokensDebug(label: string, ...rest: any[]) {
-  if (!TOKENS_DEBUG) return
-  //if (label.startsWith('listAssets')) {
-  logWithTimestamp(`[BTMS:${TOKENS_SOURCE_TAG}] ${label}`, ...rest)
-  //}
-}
 
 const formatDate = (tx: TokenTransaction) => {
   if (tx.timestamp) {
@@ -350,7 +339,7 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
               <Box sx={{ display: 'flex', gap: 1.5 }}>
                 <Send assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
                 <Receive assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
-                <Melt assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
+                <Burn assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
               </Box>
               <Box sx={{ mt: 2 }}>
                 <Button
@@ -476,14 +465,14 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                   const typeLabel = tx.type === 'issue' ? 'Issued'
                     : tx.type === 'send' ? 'Sent'
                       : tx.type === 'receive' ? 'Received'
-                        : tx.type === 'melt' ? 'Melted'
+                        : tx.type === 'burn' ? 'Burned'
                           : tx.direction === 'incoming' ? 'Received' : 'Sent'
 
                   const getTypeIcon = () => {
                     if (tx.type === 'issue') return <AddCircleOutlineIcon sx={{ fontSize: 16 }} />
                     if (tx.type === 'send') return <SendIcon sx={{ fontSize: 16 }} />
                     if (tx.type === 'receive') return <CallReceivedIcon sx={{ fontSize: 16 }} />
-                    if (tx.type === 'melt') return <LocalFireDepartmentIcon sx={{ fontSize: 16 }} />
+                    if (tx.type === 'burn') return <LocalFireDepartmentIcon sx={{ fontSize: 16 }} />
                     return tx.direction === 'incoming' ? <CallReceivedIcon sx={{ fontSize: 16 }} /> : <SendIcon sx={{ fontSize: 16 }} />
                   }
 
@@ -501,7 +490,7 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
                             icon={getTypeIcon()}
                             label={typeLabel}
                             size="small"
-                            color={isCredit ? 'success' : (tx.type === 'send' || (tx.direction === 'outgoing' && tx.type !== 'melt')) ? 'warning' : 'error'}
+                            color={isCredit ? 'success' : (tx.type === 'send' || (tx.direction === 'outgoing' && tx.type !== 'burn')) ? 'warning' : 'error'}
                             sx={{ minWidth: 90, fontWeight: 500 }}
                           />
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

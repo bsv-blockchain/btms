@@ -43,31 +43,18 @@ const Mint: React.FC<MintProps> = ({ history }) => {
   }
 
   const mint = async () => {
-    const traceId = `mint_${Date.now()}`
     setLoading(true)
     try {
-      console.log(`[${traceId}] Mint button clicked with`, {
-        name,
-        quantity,
-        descriptionLen: description.length,
-        hasImage: !!photoFile
-      })
-
       if (name.trim() === '') {
         toast.error('Enter a name for the token!')
-        console.warn(`[${traceId}] Aborting: name missing`)
         return
       }
       if (quantity.trim() === '' || Number.isNaN(Number(quantity))) {
         toast.error('Enter a quantity for the max number of tokens!')
-        console.warn(`[${traceId}] Aborting: quantity missing or NaN`, {
-          quantity
-        })
         return
       }
       if (description.trim() === '') {
         toast.error('Enter a description for the token!')
-        console.warn(`[${traceId}] Aborting: description missing`)
         return
       }
 
@@ -75,12 +62,6 @@ const Mint: React.FC<MintProps> = ({ history }) => {
       let iconURL: string | null = null
       if (photoFile) {
         try {
-          console.log(`[${traceId}] Uploading image to UHRP...`, {
-            fileName: photoFile.name,
-            fileSize: photoFile.size,
-            fileType: photoFile.type
-          })
-
           // Read file as array buffer
           const arrayBuffer = await photoFile.arrayBuffer()
           const fileData = new Uint8Array(arrayBuffer)
@@ -101,22 +82,14 @@ const Mint: React.FC<MintProps> = ({ history }) => {
 
           iconURL = uploadResult.uhrpURL
 
-          console.log(`[${traceId}] Image uploaded to UHRP:`, iconURL)
           toast.success('Image uploaded successfully!')
         } catch (uploadErr: any) {
-          console.error(`[${traceId}] Failed to upload image to UHRP:`, uploadErr)
           toast.error('Failed to upload image. Continuing without image.')
           // Continue without image rather than failing the entire mint
         }
       }
 
       const amount = Number(quantity)
-      console.log(`[${traceId}] Calling btms.issue(...)`, {
-        amount,
-        name,
-        description,
-        iconURL
-      })
       const res = await btms.issue(
         amount,
         name,
@@ -127,15 +100,11 @@ const Mint: React.FC<MintProps> = ({ history }) => {
         })
       )
 
-      console.log(`[${traceId}] btms.issue(...) returned`, res)
-
       toast.success(`Issued ${quantity} ${name} successfully!`)
       history.push('/')
     } catch (err: any) {
-      console.error('[mint] error during mint', err)
       toast.error(err?.message || 'Something went wrong while minting.')
     } finally {
-      console.log(`[${traceId}] Mint flow done (success or fail)`)
       setLoading(false)
     }
   }

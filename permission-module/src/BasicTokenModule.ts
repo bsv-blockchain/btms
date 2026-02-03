@@ -551,9 +551,7 @@ export class BasicTokenModule implements PermissionsModule {
           const spendMatch = input.inputDescription.match(/Spend (\d+) tokens?/i)
           const burnMatch = input.inputDescription.match(/Burn (\d+) tokens?/i)
           const burnInputMatch = input.inputDescription.match(/Input (\d+) tokens? for burn/i)
-          const meltMatch = input.inputDescription.match(/Melt (\d+) tokens?/i)
-          const meltInputMatch = input.inputDescription.match(/Input (\d+) tokens? for melt/i)
-          const parsedAmount = parseInt((spendMatch || burnMatch || burnInputMatch || meltMatch || meltInputMatch)?.[1] || '', 10)
+          const parsedAmount = parseInt((spendMatch || burnMatch || burnInputMatch)?.[1] || '', 10)
           if (!isNaN(parsedAmount) && parsedAmount > 0) {
             descriptionInputAmount += parsedAmount
           }

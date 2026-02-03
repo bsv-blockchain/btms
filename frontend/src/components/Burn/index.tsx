@@ -17,13 +17,13 @@ import { toast } from 'react-toastify'
 
 import { Asset, btms } from '../../btms/index'
 
-interface MeltProps {
+interface BurnProps {
   assetId: string
   asset: Asset
   onReloadNeeded?: () => void
 }
 
-const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } }) => {
+const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } }) => {
   const [quantity, setQuantity] = useState('')
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -32,9 +32,9 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
   const qty = Number(quantity)
   const quantityValid = quantity.trim() !== '' && Number.isFinite(qty) && qty > 0 && qty <= asset.balance
 
-  const canMelt = asset.balance > 0 && quantityValid && !loading
+  const canBurn = asset.balance > 0 && quantityValid && !loading
 
-  const handleMeltCancel = () => {
+  const handleBurnCancel = () => {
     setQuantity('')
     setOpen(false)
     setConfirmStep(false)
@@ -48,7 +48,7 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
     setConfirmStep(true)
   }
 
-  const handleMelt = async () => {
+  const handleBurn = async () => {
     try {
       setLoading(true)
 
@@ -84,7 +84,7 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       } else if (rawMessage.includes('Cannot read properties of undefined')) {
         userMessage = 'Token data is corrupted. Please try refreshing the page.'
       } else if (rawMessage.includes('No spendable tokens found')) {
-        userMessage = 'No tokens available to melt'
+        userMessage = 'No tokens available to burn'
       } else if (rawMessage.includes('network') || rawMessage.includes('Network')) {
         userMessage = 'Network error. Please check your connection and try again.'
       } else {
@@ -115,7 +115,7 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
         Burn
       </Button>
 
-      <Dialog open={open} onClose={loading ? undefined : handleMeltCancel} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={loading ? undefined : handleBurnCancel} maxWidth="sm" fullWidth>
         <DialogTitle variant="h4" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
           <LocalFireDepartmentIcon color="error" />
           Burn {asset.name}
@@ -193,13 +193,13 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button disabled={loading} color="inherit" variant="outlined" onClick={handleMeltCancel}>
+          <Button disabled={loading} color="inherit" variant="outlined" onClick={handleBurnCancel}>
             Cancel
           </Button>
 
           {!confirmStep ? (
             <Button
-              disabled={!canMelt}
+              disabled={!canBurn}
               color="error"
               variant="contained"
               onClick={handleProceedToConfirm}
@@ -211,7 +211,7 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
               disabled={loading}
               color="error"
               variant="contained"
-              onClick={handleMelt}
+              onClick={handleBurn}
               startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <LocalFireDepartmentIcon />}
             >
               {loading ? 'Burning...' : 'Confirm Burn'}
@@ -223,4 +223,4 @@ const Melt: React.FC<MeltProps> = ({ assetId, asset, onReloadNeeded = () => { } 
   )
 }
 
-export default Melt
+export default Burn

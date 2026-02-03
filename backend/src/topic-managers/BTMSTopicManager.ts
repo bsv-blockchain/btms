@@ -17,16 +17,10 @@ export default class BTMSTopicManager implements TopicManager {
     const outputsToAdmit: number[] = []
     const coinsToRetain: number[] = []
 
-    console.log('[BTMSTopicManager] identifyAdmissibleOutputs called')
-    console.log('[BTMSTopicManager] previousCoins:', previousCoins)
-
     try {
       const parsedTransaction = Transaction.fromBEEF(beef)
       const beefObj = Beef.fromBinary(beef)
       const txid = parsedTransaction.id('hex')
-      console.log('[BTMSTopicManager] Parsed transaction txid:', txid)
-      console.log('[BTMSTopicManager] Number of inputs:', parsedTransaction.inputs.length)
-      console.log('[BTMSTopicManager] Number of outputs:', parsedTransaction.outputs.length)
 
       // Validate params
       if (!Array.isArray(parsedTransaction.outputs) || parsedTransaction.outputs.length < 1) {
@@ -62,19 +56,14 @@ export default class BTMSTopicManager implements TopicManager {
         const sourceOutput = sourceTx.outputs[sourceOutputIndex]
 
         if (sourceOutput?.lockingScript) {
-          console.log(`[BTMSTopicManager] Found previous UTXO: ${sourceTxid}.${sourceOutputIndex} (coinIndex: ${coinIndex})`)
           previousUTXOs.push({
             txid: sourceTxid,
             outputIndex: sourceOutputIndex,
             lockingScript: sourceOutput.lockingScript,
             coinIndex
           })
-        } else {
-          console.log(`[BTMSTopicManager] Could not find source output for coinIndex ${coinIndex}`)
         }
       }
-
-      console.log('[BTMSTopicManager] Total previous UTXOs found:', previousUTXOs.length)
 
       // First, we build an object with the assets we are allowed to spend.
       // For each asset, we track the amount we are allowed to spend.
@@ -96,8 +85,6 @@ export default class BTMSTopicManager implements TopicManager {
           const amount = Number(Utils.toUTF8(decoded.fields[1]))
           const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
 
-          console.log(`[BTMSTopicManager] Previous UTXO decoded - assetId: ${assetId}, amount: ${amount}, metadata: ${metadata}`)
-
           // Track the amounts for previous UTXOs
           if (!maxNumberOfEachAsset[assetId]) {
             maxNumberOfEachAsset[assetId] = {
@@ -113,8 +100,6 @@ export default class BTMSTopicManager implements TopicManager {
         }
       }
 
-      console.log('[BTMSTopicManager] maxNumberOfEachAsset:', JSON.stringify(maxNumberOfEachAsset, null, 2))
-
       // For each output, it is valid as long as either:
       // 1. It is an issuance of a new asset, or
       // 2. The total for that asset does not exceed what's allowed
@@ -128,7 +113,6 @@ export default class BTMSTopicManager implements TopicManager {
 
           // Issuance outputs are always valid
           if (assetId === 'ISSUE') {
-            console.log(`[BTMSTopicManager] Output ${i}: ISSUE - admitting`)
             outputsToAdmit.push(i)
             continue
           }
@@ -144,30 +128,20 @@ export default class BTMSTopicManager implements TopicManager {
 
           // Validate the amount and metadata
           const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
-          console.log(`[BTMSTopicManager] Output ${i}: assetId=${assetId}, amount=${amount}, runningTotal=${assetTotals[assetId]}, metadata=${metadata}`)
-
           if (!maxNumberOfEachAsset[assetId]) {
-            console.log(`[BTMSTopicManager] Output ${i}: REJECTED - no previous UTXO for assetId ${assetId}`)
             continue
           }
           if (assetTotals[assetId] > maxNumberOfEachAsset[assetId].amount) {
-            console.log(`[BTMSTopicManager] Output ${i}: REJECTED - total ${assetTotals[assetId]} exceeds max ${maxNumberOfEachAsset[assetId].amount}`)
             continue
           }
           if (maxNumberOfEachAsset[assetId].metadata !== metadata) {
-            console.log(`[BTMSTopicManager] Output ${i}: REJECTED - metadata mismatch: "${metadata}" vs "${maxNumberOfEachAsset[assetId].metadata}"`)
             continue
           }
-
-          console.log(`[BTMSTopicManager] Output ${i}: ADMITTED`)
           outputsToAdmit.push(i)
         } catch (e) {
-          console.log(`[BTMSTopicManager] Output ${i}: not a PushDrop output, skipping`)
           continue
         }
       }
-
-      console.log('[BTMSTopicManager] outputsToAdmit after output processing:', outputsToAdmit)
 
       // Determine which previous coins to retain
       for (const p of previousUTXOs) {
@@ -195,23 +169,17 @@ export default class BTMSTopicManager implements TopicManager {
           })
 
           if (assetInOutputs) {
-            console.log(`[BTMSTopicManager] Retaining coin ${p.coinIndex} (${p.txid}.${p.outputIndex}) for assetId ${assetId}`)
             coinsToRetain.push(p.coinIndex)
-          } else {
-            console.log(`[BTMSTopicManager] NOT retaining coin ${p.coinIndex} (${p.txid}.${p.outputIndex}) - asset ${assetId} not in admitted outputs`)
           }
         } catch {
           continue
         }
       }
-
-      console.log('[BTMSTopicManager] Final result - outputsToAdmit:', outputsToAdmit, 'coinsToRetain:', coinsToRetain)
       return {
         outputsToAdmit,
         coinsToRetain
       }
     } catch (error) {
-      console.error('[BTMSTopicManager] Error identifying admissible outputs:', error)
       return {
         outputsToAdmit: [],
         coinsToRetain: []

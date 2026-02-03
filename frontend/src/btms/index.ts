@@ -189,7 +189,7 @@ class BTMSFrontend {
   async burn(
     assetId: string,
     amount?: number
-  ): Promise<{ txid: string; success: boolean; amountMelted: number }> {
+  ): Promise<{ txid: string; success: boolean; amountBurned: number }> {
     const result = await this.core.burn(assetId, amount)
 
     if (!result.success) {
@@ -202,7 +202,7 @@ class BTMSFrontend {
     return {
       txid: result.txid,
       success: true,
-      amountMelted: result.amountMelted
+      amountBurned: result.amountBurned
     }
   }
 
