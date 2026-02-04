@@ -1,6 +1,6 @@
 import { CreateActionArgs, CreateActionResult, CreateSignatureArgs, Hash, ListActionsArgs, LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { PermissionsModule } from '@bsv/wallet-toolbox-client'
-import { BTMS, ISSUE_MARKER } from '../../core'
+import { BTMS, ISSUE_MARKER } from '@bsv/btms-core'
 import { AuthorizedTransaction, TokenSpendInfo, P_BASKET_PREFIX, BTMS_FIELD, ParsedTokenInfo } from './types'
 
 /**
