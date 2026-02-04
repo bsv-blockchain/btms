@@ -18,13 +18,12 @@ import TokenIcon from '@mui/icons-material/Token'
 import AppsIcon from '@mui/icons-material/Apps'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import SendIcon from '@mui/icons-material/Send'
-import PersonIcon from '@mui/icons-material/Person'
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { Img } from '@bsv/uhrp-react'
 import { useTheme } from '@mui/material/styles'
 
-interface TokenUsagePromptProps {
+interface TokenAccessPromptProps {
   app: string
   message: string
   onAllow: () => void
@@ -267,7 +266,7 @@ const AppOriginChip: React.FC<{ app: string; size?: 'default' | 'compact'; palet
  * Displays comprehensive token information in an elegant, user-friendly format.
  * Supports spend, list actions, and list outputs operations.
  */
-const TokenUsagePromptDialog: React.FC<TokenUsagePromptProps> = ({
+const TokenAccessPromptDialog: React.FC<TokenAccessPromptProps> = ({
   app,
   message,
   onAllow,
@@ -612,7 +611,7 @@ export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
     if (!promptState) return null
 
     return (
-      <TokenUsagePromptDialog
+      <TokenAccessPromptDialog
         app={promptState.app}
         message={promptState.message}
         onAllow={handleAllow}
@@ -628,4 +627,4 @@ export const useTokenSpendPrompt = (focusHandlers?: FocusHandlers) => {
   }
 }
 
-export default TokenUsagePromptDialog
+export default TokenAccessPromptDialog

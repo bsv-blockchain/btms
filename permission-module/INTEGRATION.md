@@ -17,7 +17,7 @@ Complete guide for integrating the BTMS Permission Module into your wallet appli
 The BTMS Permission Module provides wallet permission management for BTMS token operations. It consists of two main components:
 
 1. **BasicTokenModule** - Intercepts wallet calls for BTMS token operations and prompts users for authorization
-2. **TokenUsagePrompt** - React UI component for displaying token spending authorization requests
+2. **TokenAccessPrompt** - React UI component for displaying token spending authorization requests
 
 ## Architecture
 
@@ -32,7 +32,7 @@ BasicTokenModule (intercepts via P-basket delegation)
     ↓
 requestTokenAccess (your callback)
     ↓
-TokenUsagePrompt UI (shows dialog)
+TokenAccessPrompt UI (shows dialog)
     ↓
 User Approves/Denies
     ↓
@@ -49,7 +49,7 @@ Transaction Completes/Fails
 - Manages session-based authorization for transaction flows
 - Validates transaction integrity using BIP-143 preimage verification
 
-**TokenUsagePrompt:**
+**TokenAccessPrompt:**
 - Displays token information (amount, name, asset ID)
 - Shows recipient and change details
 - Handles window focus management (optional)
@@ -304,7 +304,7 @@ const basicTokenModule = new BasicTokenModule(requestTokenAccess, btms)
 
 ### Custom Prompt Implementation
 
-If you want to use your own UI instead of the provided `TokenUsagePrompt`:
+If you want to use your own UI instead of the provided `TokenAccessPrompt`:
 
 ```typescript
 const customPromptFunction = async (app: string, message: string): Promise<boolean> => {

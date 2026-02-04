@@ -536,7 +536,7 @@ export class BasicTokenModule implements PermissionsModule {
    * Prompts user for token spend authorization with detailed information.
    * 
    * SECURITY: The prompt data is JSON-encoded to prevent injection attacks.
-   * The UI component (TokenUsagePrompt) is responsible for safely rendering this data.
+   * The UI component (TokenAccessPrompt) is responsible for safely rendering this data.
    * 
    * @param originator - dApp identifier
    * @param spendInfo - Parsed token spend information

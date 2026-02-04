@@ -71,7 +71,7 @@ React hook for managing token usage prompts.
 - `promptUser: (app: string, message: string) => Promise<boolean>` - Function to show prompt
 - `PromptComponent: React.ComponentType` - Component to render
 
-### `TokenUsagePromptDialog`
+### `TokenAccessPromptDialog`
 
 The underlying dialog component (exported as default).
 
@@ -124,7 +124,7 @@ The `message` parameter contains JSON with:
 
 ## Components
 
-### TokenUsagePromptDialog
+### TokenAccessPromptDialog
 
 Displays a Material-UI dialog with:
 - Token icon and name

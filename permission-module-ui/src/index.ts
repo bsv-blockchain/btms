@@ -6,5 +6,5 @@
  * @bsv/btms-permission-module core package.
  */
 
-export { useTokenSpendPrompt, type FocusHandlers } from './TokenUsagePrompt.js'
-export { default as TokenUsagePromptDialog } from './TokenUsagePrompt.js'
+export { useTokenSpendPrompt, type FocusHandlers } from './TokenAccessPrompt.js'
+export { default as TokenAccessPromptDialog } from './TokenAccessPrompt.js'
