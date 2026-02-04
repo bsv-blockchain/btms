@@ -7,7 +7,6 @@ import {
   Typography,
   Box,
   Stack,
-  Divider,
   Avatar,
   Chip,
   IconButton,
@@ -286,11 +285,14 @@ const TokenAccessPromptDialog: React.FC<TokenAccessPromptProps> = ({
   const textMuted = isDarkMode ? 'rgba(255, 255, 255, 0.6)' : 'rgba(55, 65, 81, 0.6)'
   const borderSoft = isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)'
 
-  const handleCopyAssetId = useCallback(() => {
-    if (promptInfo?.assetId) {
-      navigator.clipboard.writeText(promptInfo.assetId)
+  const handleCopyAssetId = useCallback(async () => {
+    if (!promptInfo?.assetId || !navigator?.clipboard?.writeText) return
+    try {
+      await navigator.clipboard.writeText(promptInfo.assetId)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Ignore clipboard failures (permissions/unsupported)
     }
   }, [promptInfo?.assetId])
 
