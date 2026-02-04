@@ -1,6 +1,6 @@
 import { AdmittanceInstructions, TopicManager } from '@bsv/overlay'
 import { Beef, LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
-import docs from '../docs/BTMSTopicManagerDocs.md.js'
+import docs from '../docs/BTMSTopicManagerDocs.js'
 
 /**
  * Implements a topic manager for BTMS token management
@@ -16,14 +16,14 @@ export default class BTMSTopicManager implements TopicManager {
   async identifyAdmissibleOutputs(beef: number[], previousCoins: number[]): Promise<AdmittanceInstructions> {
     const outputsToAdmit: number[] = []
     const coinsToRetain: number[] = []
+    const coinsRemoved: number[] = []
 
     try {
       const parsedTransaction = Transaction.fromBEEF(beef)
       const beefObj = Beef.fromBinary(beef)
-      const txid = parsedTransaction.id('hex')
 
       // Validate params
-      if (!Array.isArray(parsedTransaction.outputs) || parsedTransaction.outputs.length < 1) {
+      if (!Array.isArray(parsedTransaction.outputs)) {
         throw new Error('Missing parameter: outputs')
       }
 
@@ -83,7 +83,7 @@ export default class BTMSTopicManager implements TopicManager {
           }
 
           const amount = Number(Utils.toUTF8(decoded.fields[1]))
-          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const metadata = decoded.fields.length === 4 ? Utils.toUTF8(decoded.fields[2]) : undefined
 
           // Track the amounts for previous UTXOs
           if (!maxNumberOfEachAsset[assetId]) {
@@ -127,7 +127,7 @@ export default class BTMSTopicManager implements TopicManager {
           assetTotals[assetId] += amount
 
           // Validate the amount and metadata
-          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const metadata = decoded.fields.length === 4 ? Utils.toUTF8(decoded.fields[2]) : undefined
           if (!maxNumberOfEachAsset[assetId]) {
             continue
           }
@@ -175,14 +175,18 @@ export default class BTMSTopicManager implements TopicManager {
           continue
         }
       }
+      coinsRemoved.push(...previousCoins.filter((coinIndex) => !coinsToRetain.includes(coinIndex)))
+
       return {
         outputsToAdmit,
-        coinsToRetain
+        coinsToRetain,
+        coinsRemoved
       }
     } catch (error) {
       return {
         outputsToAdmit: [],
-        coinsToRetain: []
+        coinsToRetain: [],
+        coinsRemoved: []
       }
     }
   }

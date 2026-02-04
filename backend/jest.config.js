@@ -3,7 +3,6 @@ export default {
   testEnvironment: 'node',
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
-    '\\.md\\.js$': '<rootDir>/__mocks__/docsMock.js',
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {

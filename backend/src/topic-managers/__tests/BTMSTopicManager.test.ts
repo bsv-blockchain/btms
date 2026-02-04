@@ -14,7 +14,8 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
   chunks.push({ op: 0xac }) // OP_CHECKSIG
 
   // Push fields
-  for (const field of fields) {
+  const fieldsWithSignature = [...fields, 'mock_signature']
+  for (const field of fieldsWithSignature) {
     const data = Utils.toArray(field, 'utf8')
     if (data.length <= 75) {
       chunks.push({ op: data.length, data })
@@ -26,7 +27,7 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
   }
 
   // Drop fields
-  let remaining = fields.length
+  let remaining = fieldsWithSignature.length
   while (remaining > 1) {
     chunks.push({ op: 0x6d }) // OP_2DROP
     remaining -= 2
@@ -45,6 +46,17 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
 function createBeefWithSources(tx: Transaction): number[] {
   // Use toBEEF() which properly includes all source transactions from inputs
   return tx.toBEEF()
+}
+
+function expectAdmitted(
+  admitted: { outputsToAdmit: number[]; coinsToRetain: number[]; coinsRemoved?: number[] },
+  expected: { outputsToAdmit: number[]; coinsToRetain: number[] },
+  previousCoins: number[]
+): void {
+  expect(admitted).toEqual({
+    ...expected,
+    coinsRemoved: previousCoins.filter((coinIndex) => !expected.coinsToRetain.includes(coinIndex))
+  })
 }
 
 describe('BTMS Topic Manager', () => {
@@ -67,10 +79,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [] }, [])
     })
 
     it('Admits issuance output with metadata', async () => {
@@ -81,10 +90,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [] }, [])
     })
   })
 
@@ -110,10 +116,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
     })
 
     it('Redeems an issuance output with metadata', async () => {
@@ -135,10 +138,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
     })
 
     it('Will not redeem issuance output if metadata changes', async () => {
@@ -160,10 +160,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
     })
 
     it('Does not redeem issuance output when amount is too large', async () => {
@@ -185,10 +182,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
     })
   })
 
@@ -210,10 +204,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
     })
 
     it('Redeems a non-issuance output with metadata', async () => {
@@ -233,10 +224,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
     })
 
     it('Will not redeem non-issuance output when metadata changes', async () => {
@@ -256,10 +244,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
     })
 
     it('Does not admit non-issuance outputs when amounts are too large', async () => {
@@ -279,10 +264,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
     })
   })
 
@@ -304,10 +286,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0, 1],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0, 1], coinsToRetain: [0] }, [0])
     })
 
     it('Will not split for more than the original amount, only letting the first outputs through', async () => {
@@ -327,10 +306,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
     })
 
     it('Merges two tokens of the same asset into one output', async () => {
@@ -356,10 +332,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0, 1]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0, 1] }, [0, 1])
     })
 
     it('Does not merge two different assets into one output', async () => {
@@ -385,10 +358,7 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0, 1])
     })
   })
 
@@ -412,10 +382,7 @@ describe('BTMS Topic Manager', () => {
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
 
       // No outputs to admit (none exist), no coins to retain (asset not in outputs)
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
     })
 
     it('Allows partial burning - spending more inputs than outputs', async () => {
@@ -445,10 +412,7 @@ describe('BTMS Topic Manager', () => {
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
 
       // Output is valid (100 <= 250), coins retained for the asset
-      expect(admitted).toEqual({
-        outputsToAdmit: [0],
-        coinsToRetain: [0, 1]
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0, 1] }, [0, 1])
     })
 
     it('Allows burning entire balance across multiple assets', async () => {
@@ -477,10 +441,7 @@ describe('BTMS Topic Manager', () => {
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1])
 
       // No outputs, no coins retained
-      expect(admitted).toEqual({
-        outputsToAdmit: [],
-        coinsToRetain: []
-      })
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0, 1])
     })
   })
 
@@ -525,10 +486,11 @@ describe('BTMS Topic Manager', () => {
       const beef = createBeefWithSources(tx)
       const admitted = await manager.identifyAdmissibleOutputs(beef, [0, 1, 2, 3, 4, 5])
 
-      expect(admitted).toEqual({
-        outputsToAdmit: [0, 1, 2, 3, 4, 5],
-        coinsToRetain: [0, 1, 2, 3, 4]
-      })
+      expectAdmitted(
+        admitted,
+        { outputsToAdmit: [0, 1, 2, 3, 4, 5], coinsToRetain: [0, 1, 2, 3, 4] },
+        [0, 1, 2, 3, 4, 5]
+      )
     })
   })
 })

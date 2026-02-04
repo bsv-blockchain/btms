@@ -3,7 +3,7 @@ import { AdmissionMode, LookupFormula, LookupQuestion, LookupService, OutputAdmi
 import { PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { Db } from 'mongodb'
 import { btmsProtocol, BTMSLookupResult, BTMSQuery, BTMSRecord } from './types.js'
-import docs from '../docs/BTMSLookupDocs.md.js'
+import docs from '../docs/BTMSLookupDocs.js'
 
 /**
  * Implements a lookup service for BTMS tokens
@@ -31,9 +31,9 @@ class BTMSLookupService implements LookupService {
     try {
       const decoded = PushDrop.decode(lockingScript)
 
-      // BTMS tokens have 2-3 fields: [assetId, amount, metadata?]
+      // BTMS tokens have 3-4 fields: [assetId, amount, metadata?, signature]
       if (decoded.fields.length < 3 || decoded.fields.length > 4) {
-        throw new Error(`BTMS token must have 2-3 fields + signature, got ${decoded.fields.length}`)
+        throw new Error(`BTMS token must have 3-4 fields including signature, got ${decoded.fields.length}`)
       }
 
       const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
@@ -48,7 +48,7 @@ class BTMSLookupService implements LookupService {
       }
 
       // Extract metadata if present
-      const metadata = decoded.fields[btmsProtocol.metadata]
+      const metadata = decoded.fields.length === 4
         ? Utils.toUTF8(decoded.fields[btmsProtocol.metadata])
         : undefined
 
