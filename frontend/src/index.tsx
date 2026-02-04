@@ -9,28 +9,6 @@ import 'react-toastify/dist/ReactToastify.css'
 
 import App from './App'
 import web3Theme from './theme'
-import { btms } from './btms/index'
-
-  // ---- global BTMS fail-soft patch ----
-  ; (function patchBTMS() {
-    const anyBtms = btms as any
-    if (!anyBtms || typeof anyBtms.listAssets !== 'function') return
-    if (anyBtms.__safeListAssets) return
-
-    const original = anyBtms.listAssets.bind(anyBtms)
-
-    anyBtms.listAssets = async (...args: any[]) => {
-      try {
-        return await original(...args)
-      } catch (err) {
-        return []
-      }
-    }
-
-    anyBtms.__safeListAssets = true
-  })()
-// ---- end patch ----
-
 const rootEl = document.getElementById('root')
 if (!rootEl) {
   throw new Error('#root not found in DOM')

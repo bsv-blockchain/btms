@@ -8,7 +8,8 @@ import { toast } from 'react-toastify'
 import useStyles from './mint-style'
 import { StorageUploader } from '@bsv/sdk'
 
-import { btms, walletClient } from '../../btms/index'
+import { btms, walletClient } from '../../btms'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 interface MintProps {
   history: {
@@ -90,20 +91,16 @@ const Mint: React.FC<MintProps> = ({ history }) => {
       }
 
       const amount = Number(quantity)
-      const res = await btms.issue(
-        amount,
+      const res = await btms.issue(amount, {
         name,
-        undefined, // symbol (unused)
-        JSON.stringify({
-          description,
-          iconURL
-        })
-      )
+        description,
+        iconURL
+      })
 
       toast.success(`Issued ${quantity} ${name} successfully!`)
       history.push('/')
-    } catch (err: any) {
-      toast.error(err?.message || 'Something went wrong while minting.')
+    } catch (err: unknown) {
+      toast.error(formatBtmsError(err, 'Something went wrong while minting.'))
     } finally {
       setLoading(false)
     }

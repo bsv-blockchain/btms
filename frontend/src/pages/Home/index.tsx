@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Grid,
@@ -22,7 +22,10 @@ import { toast } from 'react-toastify'
 import useStyles from './home-style'
 import Receive from '../../components/Receive'
 import Send from '../../components/Send'
-import { Asset, btms } from '../../btms/index'
+import { AssetView } from '../../btms/types'
+import useBtmsAssets from '../../hooks/useBtmsAssets'
+import useBtmsIncoming from '../../hooks/useBtmsIncoming'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 interface HomeProps {
   history: {
@@ -35,26 +38,31 @@ const INCOMING_REFRESH_MS = 30000
 const Home: React.FC<HomeProps> = ({ history }) => {
   const classes = useStyles()
 
-  const [walletTokens, setWalletTokens] = useState<Asset[]>([])
-  const [tokensLoading, setTokensLoading] = useState(true)
+  const { assets: walletTokens, loading: assetsLoading, error: assetsError, refresh: refreshAssets } = useBtmsAssets()
+  const {
+    incoming,
+    error: incomingError,
+    refresh: refreshIncomingList
+  } = useBtmsIncoming(undefined, { auto: false })
 
-  const [incomingByAsset, setIncomingByAsset] = useState<Record<string, number>>({})
-  const [incomingAmountsByAsset, setIncomingAmountsByAsset] = useState<Record<string, number>>({})
+  const incomingByAsset = useMemo(() => {
+    const countMap: Record<string, number> = {}
+    for (const msg of incoming) {
+      countMap[msg.assetId] = (countMap[msg.assetId] || 0) + 1
+    }
+    return countMap
+  }, [incoming])
+
+  const incomingAmountsByAsset = useMemo(() => {
+    const amountMap: Record<string, number> = {}
+    for (const msg of incoming) {
+      const numericAmount = Number(msg.amount) || 0
+      amountMap[msg.assetId] = (amountMap[msg.assetId] || 0) + numericAmount
+    }
+    return amountMap
+  }, [incoming])
 
   const lastIncomingFetchRef = useRef<number>(0)
-
-  useEffect(() => {
-    btms.onAssetsChanged(assets => setWalletTokens(assets))
-  }, [])
-
-  const refreshAssets = async () => {
-    try {
-      const assets = await btms.listAssets()
-      setWalletTokens(assets)
-    } catch (err: any) {
-      toast.error(err?.message || 'Error refreshing assets')
-    }
-  }
 
   const refreshIncoming = async (force = false) => {
     const now = Date.now()
@@ -63,46 +71,29 @@ const Home: React.FC<HomeProps> = ({ history }) => {
     }
 
     try {
-      const incoming = await btms.listIncomingPayments()
-      if (!Array.isArray(incoming)) {
-        lastIncomingFetchRef.current = now
-        return
-      }
-
-      const countMap: Record<string, number> = {}
-      const amountMap: Record<string, number> = {}
-
-      for (const msg of incoming) {
-        const assetId = (msg as any)?.assetId
-        if (!assetId) continue
-
-        countMap[assetId] = (countMap[assetId] || 0) + 1
-
-        const rawAmount = (msg as any).amount ?? 0
-        const numericAmount = Number(rawAmount) || 0
-        amountMap[assetId] = (amountMap[assetId] || 0) + numericAmount
-      }
-
-      setIncomingByAsset(countMap)
-      setIncomingAmountsByAsset(amountMap)
+      await refreshIncomingList()
       lastIncomingFetchRef.current = now
     } catch (err: any) {
       lastIncomingFetchRef.current = now
+      toast.error(formatBtmsError(err, 'Failed to load incoming transfers'))
     }
   }
 
   useEffect(() => {
-    ; (async () => {
-      try {
-        await refreshAssets()
-        await refreshIncoming(true)
-      } catch (err: any) {
-        toast.error(err?.message || 'Something went wrong!')
-      } finally {
-        setTokensLoading(false)
-      }
-    })()
+    void refreshIncoming(true)
   }, [])
+
+  useEffect(() => {
+    if (assetsError) {
+      toast.error(formatBtmsError(assetsError, 'Error refreshing assets'))
+    }
+  }, [assetsError])
+
+  useEffect(() => {
+    if (incomingError) {
+      toast.error(formatBtmsError(incomingError, 'Failed to load incoming transfers'))
+    }
+  }, [incomingError])
 
   // --------------------------------------------------------------
   // MERGE wallet tokens + incoming messages (STRICT, NO STALE DATA)
@@ -110,8 +101,8 @@ const Home: React.FC<HomeProps> = ({ history }) => {
   // --------------------------------------------------------------
   // MERGE wallet tokens + incoming messages (STRICT, CORRECT TYPES)
   // --------------------------------------------------------------
-  const mergedTokens: Asset[] = useMemo(() => {
-    const byId: Record<string, Asset> = {}
+  const mergedTokens: AssetView[] = useMemo(() => {
+    const byId: Record<string, AssetView> = {}
 
     // ----------------------------------------------------------
     // 1. Normal wallet tokens (always present)
@@ -148,10 +139,10 @@ const Home: React.FC<HomeProps> = ({ history }) => {
           assetId,
           name: assetId,
           balance: 0,
-          metadata: '',
+          metadata: {},
           hasPendingIncoming,
-          incoming, // BOOLEAN
-          incomingAmount // NUMBER
+          incoming,
+          incomingAmount
         }
       }
     }
@@ -244,7 +235,7 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                 </TableRow>
               </TableHead>
 
-              {tokensLoading ? (
+              {assetsLoading ? (
                 <TableBody>
                   <TableRow />
                 </TableBody>
@@ -258,7 +249,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                     const hasWalletBalance = token.balance > 0
                     const walletBalance = token.balance
 
-                    const incomingOnly = !hasWalletBalance && incomingCount > 0
                     const hasPendingIncoming = !!token.hasPendingIncoming || incomingCount > 0
 
                     const displayBalance = walletBalance
@@ -271,17 +261,7 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                       <span style={{ opacity: 0.5 }}>{displayBalance}</span>
                     )
 
-                    let iconURL: string | undefined
-                    if (token.metadata) {
-                      try {
-                        const parsed = JSON.parse(token.metadata)
-                        if (parsed && typeof parsed.iconURL === 'string') {
-                          iconURL = parsed.iconURL
-                        }
-                      } catch {
-                        iconURL = undefined
-                      }
-                    }
+                    const iconURL = token.iconURL
 
                     return (
                       <TableRow key={i} className={classes.link}>
@@ -369,7 +349,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                                 await refreshAssets()
                                 await refreshIncoming(true)
                               }}
-                              {...(incomingOnly ? { fromMessageBoxOnly: true } : {})}
                             />
                           ) : (
                             <Button
@@ -391,14 +370,14 @@ const Home: React.FC<HomeProps> = ({ history }) => {
           </TableContainer>
         </Grid>
 
-        {tokensLoading && (
+        {assetsLoading && (
           <Box sx={{ mt: 4, textAlign: 'center' }}>
             <Typography sx={{ mb: 2 }}>Loading tokens...</Typography>
             <LinearProgress color="secondary" />
           </Box>
         )}
 
-        {!tokensLoading && mergedTokens.length === 0 && (
+        {!assetsLoading && mergedTokens.length === 0 && (
           <Box sx={{ mt: 4, textAlign: 'center' }}>
             <Typography sx={{ mb: 2 }}>No assets yet.</Typography>
             <Button component={Link} to="/mint" variant="outlined" color="secondary">

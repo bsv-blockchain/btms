@@ -1,22 +1,17 @@
 // React / UI (btms-ui)
-import React, { useState, useMemo } from 'react'
+import React, { useState } from 'react'
 import { Typography, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField, CircularProgress, Box } from '@mui/material'
 import { toast } from 'react-toastify'
 import useStyles from './send-style'
 import { IdentitySearchField } from '@bsv/identity-react'
 
-import { Asset, btms } from '../../btms/index'
-import { SatoshiValue } from '@bsv/sdk'
-
-type SendArgs = {
-  assetId: string
-  recipient: string
-  amount: SatoshiValue
-}
+import { btms } from '../../btms'
+import { AssetView } from '../../btms/types'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 interface SendProps {
   assetId: string
-  asset: Asset
+  asset: AssetView
   onReloadNeeded?: () => void
 }
 
@@ -69,7 +64,11 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
         return
       }
 
-      await btms.send(assetId, recipient, qty)
+      const result = await btms.send(assetId, recipient, qty)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to send tokens')
+      }
 
       try {
         onReloadNeeded()
@@ -77,36 +76,8 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
 
       toast.success(`Transferred ${qty} ${asset.name} successfully!`)
       setOpen(false)
-    } catch (err: any) {
-      const rawMessage = err?.message || ''
-
-      // Parse user-friendly error messages
-      let userMessage = 'Something went wrong!'
-
-      if (rawMessage.includes('User denied')) {
-        userMessage = 'Transaction cancelled by user'
-      } else if (rawMessage.includes('Permission denied') || rawMessage.includes('permission')) {
-        userMessage = 'Permission request cancelled'
-      } else if (rawMessage.includes('Insufficient') || rawMessage.includes('insufficient')) {
-        userMessage = 'Insufficient balance for this transaction'
-      } else if (rawMessage.includes('network') || rawMessage.includes('Network')) {
-        userMessage = 'Network error. Please check your connection and try again.'
-      } else if (rawMessage.includes('timeout') || rawMessage.includes('Timeout')) {
-        userMessage = 'Request timed out. Please try again.'
-      } else if (rawMessage.includes('invalid') || rawMessage.includes('Invalid')) {
-        userMessage = 'Invalid transaction details. Please check and try again.'
-      } else {
-        // Try to extract just the message part if it's a JSON-like error
-        const messageMatch = rawMessage.match(/"message"\s*:\s*"([^"]+)"/)
-        if (messageMatch && messageMatch[1]) {
-          userMessage = messageMatch[1]
-        } else if (rawMessage.length < 100 && !rawMessage.includes('{')) {
-          // Use the raw message if it's short and not JSON
-          userMessage = rawMessage
-        }
-      }
-
-      toast.error(userMessage, { autoClose: 5000 })
+    } catch (err: unknown) {
+      toast.error(formatBtmsError(err), { autoClose: 5000 })
     } finally {
       setLoading(false)
     }

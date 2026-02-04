@@ -12,6 +12,7 @@ import type {
   PubKeyHex,
   TXIDHexString,
   HexString,
+  CommsLayer,
 } from '@bsv/sdk'
 
 // ---------------------------------------------------------------------------
@@ -435,38 +436,6 @@ export interface BTMSConfig {
   /** Optional communications layer for token messaging (e.g., MessageBoxClient) */
   comms?: CommsLayer
 }
-
-// ---------------------------------------------------------------------------
-// Messaging Types (for extensibility)
-// ---------------------------------------------------------------------------
-
-/**
- * Generic communications layer interface.
- * 
- * This mirrors the CommsLayer interface from @bsv/sdk for messaging primitives.
- * BTMS uses this for token delivery via message-box or other transports.
- */
-export interface CommsLayer {
-  /**
-   * Sends a message over the store-and-forward channel.
-   */
-  sendMessage(args: { recipient: PubKeyHex, messageBox: string, body: string }, hostOverride?: string): Promise<string>
-
-  /**
-   * Lists pending messages for a message box.
-   */
-  listMessages(args: { messageBox: string, host?: string }): Promise<Array<{
-    messageId: string
-    sender: PubKeyHex
-    body: string
-  }>>
-
-  /**
-   * Acknowledges messages (deletes them from the server).
-   */
-  acknowledgeMessage(args: { messageIds: string[] }): Promise<void>
-}
-
 
 // ---------------------------------------------------------------------------
 // Ownership Proof Types

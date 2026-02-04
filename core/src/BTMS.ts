@@ -53,7 +53,6 @@ import type {
   ChangeStrategyOptions,
   ChangeContext,
   ChangeOutput,
-  CommsLayer,
   BurnResult,
   BTMSTransaction,
   GetTransactionsResult

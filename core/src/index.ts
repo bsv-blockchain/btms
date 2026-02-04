@@ -88,9 +88,6 @@ export type {
   // Configuration types
   BTMSConfig,
 
-  // Messaging types
-  CommsLayer,
-
   // Marketplace types (future)
   MarketplaceListing,
   MarketplaceOffer,

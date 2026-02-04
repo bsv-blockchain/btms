@@ -7,7 +7,7 @@
     "@bsv/btms-core": "file:../core",
     "@bsv/identity-react": "^1.1.11",
     "@bsv/message-box-client": "^1.4.5",
-    "@bsv/sdk": "^1.8.13",
+    "@bsv/sdk": "^2.0.0",
     "@bsv/uhrp-react": "^1.0.4",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

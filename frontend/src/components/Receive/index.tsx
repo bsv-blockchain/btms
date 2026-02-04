@@ -21,16 +21,17 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { toast } from 'react-toastify'
-import { Asset, btms, CoreIncomingPayment } from '../../btms/index'
+import { btms, IncomingToken } from '../../btms'
+import { AssetView } from '../../btms/types'
 import { SatoshiValue } from '@bsv/sdk'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 type ReceiveProps = {
   assetId?: string
-  asset?: { name?: string }
+  asset?: AssetView
   badge?: number | boolean
   incomingAmount?: SatoshiValue
   onReloadNeeded?: () => Promise<void> | void
-  fromMessageBoxOnly?: boolean
 }
 
 const Receive: React.FC<ReceiveProps> = ({
@@ -43,7 +44,7 @@ const Receive: React.FC<ReceiveProps> = ({
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [identityKey, setIdentityKey] = useState<string | null>(null)
-  const [incoming, setIncoming] = useState<CoreIncomingPayment[]>([])
+  const [incoming, setIncoming] = useState<IncomingToken[]>([])
 
   // -------------------------
   // 1) Load identity key
@@ -58,20 +59,7 @@ const Receive: React.FC<ReceiveProps> = ({
           return
         }
 
-        const win = window as typeof window & {
-          walletClient?: {
-            getPublicKey?: (args: { identityKey: true }) => Promise<string | { publicKey?: string }>
-          }
-        }
-        const wallet = win.walletClient
-
-        if (!wallet || typeof wallet.getPublicKey !== 'function') {
-          if (!cancelled) setIdentityKey('')
-          return
-        }
-
-        const raw = await wallet.getPublicKey({ identityKey: true })
-        const key = typeof raw === 'string' ? raw : raw?.publicKey || ''
+        const key = await btms.getIdentityKey()
 
         if (!cancelled) setIdentityKey(key)
       } catch {
@@ -89,21 +77,13 @@ const Receive: React.FC<ReceiveProps> = ({
   // 2) Load incoming payments
   // -------------------------
   const loadIncoming = useCallback(async (desiredAssetId?: string) => {
-    if (!btms || typeof btms.listIncomingPayments !== 'function') {
-      toast.error('BTMS not available in frontend')
-      return
-    }
-
     setLoading(true)
     try {
-      // NEW: btms.listIncomingPayments() now allows zero args
-      const msgs = await btms.listIncomingPayments(desiredAssetId!)
-
-      const clean: CoreIncomingPayment[] = Array.isArray(msgs) ? (msgs as CoreIncomingPayment[]) : []
+      const msgs = await btms.listIncoming(desiredAssetId)
+      const clean: IncomingToken[] = Array.isArray(msgs) ? msgs : []
       setIncoming(clean)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load incoming payments'
-      toast.error(message)
+      toast.error(formatBtmsError(err, 'Failed to load incoming payments'))
     } finally {
       setLoading(false)
     }
@@ -118,8 +98,13 @@ const Receive: React.FC<ReceiveProps> = ({
 
   const handleCopy = () => {
     if (!identityKey) return
-    navigator.clipboard.writeText(identityKey).catch(() => { })
-    toast.success('Identity key copied')
+    if (!navigator?.clipboard?.writeText) {
+      toast.error('Clipboard not available')
+      return
+    }
+    navigator.clipboard.writeText(identityKey)
+      .then(() => toast.success('Identity key copied'))
+      .catch(() => toast.error('Failed to copy identity key'))
   }
 
   const handleRefresh = async () => {
@@ -127,41 +112,16 @@ const Receive: React.FC<ReceiveProps> = ({
     await Promise.resolve(onReloadNeeded())
   }
 
-  const handleAccept = async (payment: CoreIncomingPayment) => {
-    if (!btms || typeof btms.acceptIncomingPayment !== 'function') {
-      toast.error('acceptIncomingPayment unavailable')
-      return
-    }
-
+  const handleAccept = async (payment: IncomingToken) => {
     try {
       setLoading(true)
-      await btms.acceptIncomingPayment(assetId || '', payment)
+      await btms.accept(payment)
       await loadIncoming(assetId)
       await Promise.resolve(onReloadNeeded())
       toast.success(`${payment.amount} ${asset?.name ?? ''} accepted successfully!`)
       setOpen(false)
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to accept payment')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRefund = async (payment: CoreIncomingPayment) => {
-    if (!btms || typeof btms.refundIncomingTransaction !== 'function') {
-      toast.error('refundIncomingTransaction unavailable')
-      return
-    }
-
-    try {
-      setLoading(true)
-      await btms.refundIncomingTransaction(assetId || '', payment)
-      await loadIncoming(assetId)
-      await Promise.resolve(onReloadNeeded())
-      toast.success(`Refunded ${payment.amount} ${asset?.name ?? ''}.`)
-      setOpen(false)
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to refund payment')
+      toast.error(formatBtmsError(err, 'Failed to accept payment'))
     } finally {
       setLoading(false)
     }
@@ -266,9 +226,6 @@ const Receive: React.FC<ReceiveProps> = ({
                             startIcon={loading ? <CircularProgress size={12} color="inherit" /> : null}
                           >
                             {loading ? 'Processing...' : 'Accept'}
-                          </Button>
-                          <Button size="small" color="warning" disabled={loading} onClick={() => handleRefund(pmt)}>
-                            Refund
                           </Button>
                         </TableCell>
                       </TableRow>

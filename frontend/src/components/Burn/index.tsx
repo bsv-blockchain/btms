@@ -15,11 +15,13 @@ import {
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment'
 import { toast } from 'react-toastify'
 
-import { Asset, btms } from '../../btms/index'
+import { btms } from '../../btms'
+import { AssetView } from '../../btms/types'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 interface BurnProps {
   assetId: string
-  asset: Asset
+  asset: AssetView
   onReloadNeeded?: () => void
 }
 
@@ -27,7 +29,6 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
   const [quantity, setQuantity] = useState('')
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [confirmStep, setConfirmStep] = useState(false)
 
   const qty = Number(quantity)
   const quantityValid = quantity.trim() !== '' && Number.isFinite(qty) && qty > 0 && qty <= asset.balance
@@ -37,15 +38,6 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
   const handleBurnCancel = () => {
     setQuantity('')
     setOpen(false)
-    setConfirmStep(false)
-  }
-
-  const handleProceedToConfirm = () => {
-    if (!quantityValid) {
-      toast.error('Invalid amount!')
-      return
-    }
-    setConfirmStep(true)
   }
 
   const handleBurn = async () => {
@@ -58,7 +50,11 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
       }
 
       const amountToBurn = qty === asset.balance ? undefined : qty
-      await btms.burn(assetId, amountToBurn)
+      const result = await btms.burn(assetId, amountToBurn)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to burn tokens')
+      }
 
       try {
         onReloadNeeded()
@@ -66,36 +62,9 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
 
       toast.success(`Burned ${qty} ${asset.name} successfully!`)
       setOpen(false)
-      setConfirmStep(false)
       setQuantity('')
-    } catch (err: any) {
-      const rawMessage = err?.message || ''
-
-      // Parse user-friendly error messages
-      let userMessage = 'Something went wrong!'
-
-      if (rawMessage.includes('User denied')) {
-        userMessage = 'Transaction cancelled by user'
-      } else if (rawMessage.includes('Permission denied') || rawMessage.includes('permission')) {
-        userMessage = 'Permission request cancelled'
-      } else if (rawMessage.includes('Insufficient') || rawMessage.includes('insufficient')) {
-        userMessage = 'Insufficient balance for this transaction'
-      } else if (rawMessage.includes('Cannot read properties of undefined')) {
-        userMessage = 'Token data is corrupted. Please try refreshing the page.'
-      } else if (rawMessage.includes('No spendable tokens found')) {
-        userMessage = 'No tokens available to burn'
-      } else if (rawMessage.includes('network') || rawMessage.includes('Network')) {
-        userMessage = 'Network error. Please check your connection and try again.'
-      } else {
-        const messageMatch = rawMessage.match(/"message"\s*:\s*"([^"]+)"/)
-        if (messageMatch && messageMatch[1]) {
-          userMessage = messageMatch[1]
-        } else if (rawMessage.length < 100 && !rawMessage.includes('{')) {
-          userMessage = rawMessage
-        }
-      }
-
-      toast.error(userMessage, { autoClose: 5000 })
+    } catch (err: unknown) {
+      toast.error(formatBtmsError(err), { autoClose: 5000 })
     } finally {
       setLoading(false)
     }
@@ -136,7 +105,7 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
             </Box>
           )}
 
-          {!loading && !confirmStep && (
+          {!loading && (
             <>
               <Alert severity="warning" sx={{ mb: 3 }}>
                 <Typography variant="body2">
@@ -169,26 +138,6 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
               </Button>
             </>
           )}
-
-          {!loading && confirmStep && (
-            <Box sx={{ textAlign: 'center', py: 2 }}>
-              <LocalFireDepartmentIcon sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
-
-              <Typography variant="h5" sx={{ mb: 2 }}>
-                Confirm Burn
-              </Typography>
-
-              <Typography variant="body1" sx={{ mb: 3 }}>
-                You are about to permanently burn <strong>{qty} {asset.name}</strong>.
-              </Typography>
-
-              <Alert severity="error" sx={{ textAlign: 'left' }}>
-                <Typography variant="body2">
-                  This action is <strong>irreversible</strong>. The tokens will be permanently removed from circulation and cannot be recovered.
-                </Typography>
-              </Alert>
-            </Box>
-          )}
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -196,26 +145,15 @@ const Burn: React.FC<BurnProps> = ({ assetId, asset, onReloadNeeded = () => { } 
             Cancel
           </Button>
 
-          {!confirmStep ? (
-            <Button
-              disabled={!canBurn}
-              color="error"
-              variant="contained"
-              onClick={handleProceedToConfirm}
-            >
-              Continue
-            </Button>
-          ) : (
-            <Button
-              disabled={loading}
-              color="error"
-              variant="contained"
-              onClick={handleBurn}
-              startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <LocalFireDepartmentIcon />}
-            >
-              {loading ? 'Burning...' : 'Confirm Burn'}
-            </Button>
-          )}
+          <Button
+            disabled={!canBurn}
+            color="error"
+            variant="contained"
+            onClick={handleBurn}
+            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <LocalFireDepartmentIcon />}
+          >
+            {loading ? 'Burning...' : 'Burn'}
+          </Button>
         </DialogActions>
       </Dialog>
     </>

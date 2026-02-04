@@ -1,7 +1,7 @@
 // frontend/src/pages/Tokens/index.tsx
 
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   Grid,
   Typography,
@@ -16,15 +16,12 @@ import {
   TableCell,
   Container,
   Paper,
-  Divider,
   Chip,
   IconButton,
   Tooltip,
   TablePagination,
   ToggleButton,
-  ToggleButtonGroup,
-  Card,
-  CardContent
+  ToggleButtonGroup
 } from '@mui/material'
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -44,16 +41,12 @@ import useStyles from './tokens-style'
 import Send from '../../components/Send'
 import Receive from '../../components/Receive'
 import Burn from '../../components/Burn'
-import { SatoshiValue, TXIDHexString, WalletCounterparty } from '@bsv/sdk'
-import { Asset, btms } from '../../btms'
-
-interface TokensProps {
-  match: {
-    params: {
-      assetId: string
-    }
-  }
-}
+import { TXIDHexString } from '@bsv/sdk'
+import { btms } from '../../btms'
+import { AssetView } from '../../btms/types'
+import useBtmsAssets from '../../hooks/useBtmsAssets'
+import useBtmsTransactions from '../../hooks/useBtmsTransactions'
+import { formatBtmsError } from '../../utils/formatBtmsError'
 
 interface TokenTransaction {
   date: string
@@ -80,18 +73,18 @@ const shortTxid = (txid: string) => {
   return `${txid.slice(0, 8)}...${txid.slice(-6)}`
 }
 
-const Tokens: React.FC<TokensProps> = ({ match }) => {
+const Tokens: React.FC = () => {
   const classes = useStyles()
-  let tokenID = match.params.assetId
+  const { assetId } = useParams<{ assetId?: string }>()
+  let tokenID = assetId || ''
   if (tokenID) {
     // Replace ALL underscores with dots (not just the first one)
     tokenID = tokenID.replace(/_/g, '.')
   }
 
-  const [walletTokens, setWalletTokens] = useState<Asset[]>([])
-  const [token, setToken] = useState<Asset | null>(null)
+  const { assets: walletTokens, loading: assetsLoading, error: assetsError, refresh: refreshAssets } = useBtmsAssets()
+  const [token, setToken] = useState<AssetView | null>(null)
   const [transactions, setTransactions] = useState<TokenTransaction[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [cleaningBadOutputs, setCleaningBadOutputs] = useState(false)
   const [page, setPage] = useState(0)
@@ -140,38 +133,8 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     return history
   }
 
-  useEffect(() => {
-    btms.onAssetsChanged(assets => setWalletTokens(assets))
-  }, [])
-
   const refresh = async () => {
-    const assets = await btms.listAssets()
-    const found = assets!.find(x => x.assetId === tokenID)
-    if (!found) {
-      setError(true)
-      setLoading(false)
-      toast.error('Asset not found!')
-      return
-    }
-    setToken(found)
-
-    if (typeof btms.getTransactions === 'function') {
-      const txResult = await btms.getTransactions(tokenID, 100, 0)
-      // Sort by timestamp descending (latest first)
-      const sorted = (txResult.transactions || []).sort((a, b) => {
-        const timeA = a.timestamp || 0
-        const timeB = b.timestamp || 0
-        return sortOrder === 'desc' ? timeB - timeA : timeA - timeB
-      })
-      setTransactions(sorted)
-
-      // Calculate and set balance history
-      const history = calculateBalanceHistory(sorted, found.balance)
-      setBalanceHistory(history)
-    } else {
-      setTransactions([])
-      setBalanceHistory([])
-    }
+    await refreshAssets()
   }
 
   const handleCleanBadOutputs = async () => {
@@ -196,19 +159,65 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
 
       await refresh()
     } catch (err) {
-      console.error(err)
-      toast.error('Failed to remove corrupted outputs')
+      toast.error(formatBtmsError(err, 'Failed to remove corrupted outputs'))
     } finally {
       setCleaningBadOutputs(false)
     }
   }
 
+  const { transactions: coreTransactions, loading: transactionsLoading, error: transactionsError } = useBtmsTransactions(tokenID, 100, 0)
+
   useEffect(() => {
-    ; (async () => {
-      await refresh()
-      setLoading(false)
-    })()
+    void refresh()
   }, [tokenID])
+
+  useEffect(() => {
+    if (assetsLoading) return
+    const found = walletTokens.find(x => x.assetId === tokenID)
+    if (!found) {
+      setError(true)
+      setToken(null)
+      return
+    }
+    setError(false)
+    setToken(found)
+  }, [assetsLoading, tokenID, walletTokens])
+
+  useEffect(() => {
+    if (assetsError) {
+      toast.error(formatBtmsError(assetsError, 'Failed to load assets'))
+    }
+  }, [assetsError])
+
+  useEffect(() => {
+    if (transactionsError) {
+      toast.error(formatBtmsError(transactionsError, 'Failed to load transactions'))
+    }
+  }, [transactionsError])
+
+  useEffect(() => {
+    const sorted = [...coreTransactions].sort((a, b) => {
+      const timeA = a.timestamp || 0
+      const timeB = b.timestamp || 0
+      return sortOrder === 'desc' ? timeB - timeA : timeA - timeB
+    })
+    const mapped: TokenTransaction[] = sorted.map(tx => ({
+      date: tx.timestamp ? new Date(tx.timestamp).toLocaleString() : 'Unknown',
+      timestamp: tx.timestamp,
+      amount: tx.amount,
+      txid: tx.txid,
+      counterparty: tx.counterparty || 'N/A',
+      type: tx.type,
+      direction: tx.direction,
+      status: tx.status
+    }))
+    setTransactions(mapped)
+
+    if (token) {
+      const history = calculateBalanceHistory(mapped, token.balance)
+      setBalanceHistory(history)
+    }
+  }, [coreTransactions, sortOrder, token])
 
   if (error) {
     return (
@@ -231,7 +240,7 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     )
   }
 
-  if (loading || !token) {
+  if (assetsLoading || transactionsLoading || !token) {
     return (
       <div>
         <Container>
@@ -252,22 +261,8 @@ const Tokens: React.FC<TokensProps> = ({ match }) => {
     )
   }
 
-  // Safely pull “description” if it exists on this asset
-  const tokenDescription = (token as any).description || 'Token details'
   const tokenBalance = Number(token.balance) || 0
-
-  // Parse metadata to get icon URL if available
-  let iconURL: string | undefined
-  if (token.metadata) {
-    try {
-      const parsed = JSON.parse(token.metadata)
-      if (parsed && typeof parsed.iconURL === 'string') {
-        iconURL = parsed.iconURL
-      }
-    } catch {
-      iconURL = undefined
-    }
-  }
+  const iconURL = token.iconURL
 
   return (
     <div>
