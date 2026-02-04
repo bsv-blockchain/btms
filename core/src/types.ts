@@ -501,6 +501,8 @@ export interface ProvenToken {
     lockingScript: HexString
     satoshis: SatoshiValue
   }
+  /** Key derivation identifier used to create the linkage proof */
+  keyID: string
   /** Key linkage revelation for this token */
   linkage: TokenKeyLinkage
 }

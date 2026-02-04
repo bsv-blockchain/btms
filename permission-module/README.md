@@ -42,7 +42,7 @@ npm install @bsv/sdk @bsv/wallet-toolbox-client
 import { BasicTokenModule } from '@bsv/btms-permission-module'
 
 // Create a function that shows a prompt to the user
-const promptUserForTokenUsage = async (app: string, message: string): Promise<boolean> => {
+const requestTokenAccess = async (app: string, message: string): Promise<boolean> => {
   // Parse the token spend information
   const spendInfo = JSON.parse(message)
   
@@ -61,7 +61,7 @@ const promptUserForTokenUsage = async (app: string, message: string): Promise<bo
 ### 2. Initialize the Module
 
 ```typescript
-const basicTokenModule = new BasicTokenModule(promptUserForTokenUsage)
+const basicTokenModule = new BasicTokenModule(requestTokenAccess)
 ```
 
 ### 3. Register with Wallet
@@ -119,7 +119,7 @@ Permission module for BTMS token operations.
 **Constructor:**
 ```typescript
 new BasicTokenModule(
-  promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
+  requestTokenAccess: (app: string, message: string) => Promise<boolean>
 )
 ```
 

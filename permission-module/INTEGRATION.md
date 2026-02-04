@@ -30,7 +30,7 @@ BTMS Core (createAction/createSignature)
     ↓
 BasicTokenModule (intercepts via P-basket delegation)
     ↓
-promptUserForTokenUsage (your callback)
+requestTokenAccess (your callback)
     ↓
 TokenUsagePrompt UI (shows dialog)
     ↓
@@ -89,29 +89,38 @@ import { UserContext } from './UserContext' // Your app's context
 const { isFocused, onFocusRequested, onFocusRelinquished } = useContext(UserContext)
 
 // Setup the hook with focus handlers (optional - omit for web-only apps)
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt({
+const { promptUser: requestTokenAccess, PromptComponent } = useTokenSpendPrompt({
   isFocused,
   onFocusRequested,
   onFocusRelinquished
 })
+
+const requestTokenAccessWithTheme = useCallback((app: string, message: string) => {
+  return requestTokenAccess(app, message, tokenPromptPaletteMode)
+}, [requestTokenAccess, tokenPromptPaletteMode])
 ```
 
 **For web-only applications** (no window focus management):
 
 ```typescript
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt()
+const { promptUser: requestTokenAccess, PromptComponent } = useTokenSpendPrompt()
 ```
 
-### Step 2: Initialize BasicTokenModule
+### Step 2: Initialize BTMS + BasicTokenModule
 
 Create an instance of `BasicTokenModule` and pass your prompt function.
 
 ```typescript
+import { BTMS } from '@bsv/btms-core'
 import { BasicTokenModule } from '@bsv/btms-permission-module'
+
+// Initialize BTMS for metadata lookups
+const btms = new BTMS({ wallet })
 
 // Initialize the module with your prompt function
 const basicTokenModule = new BasicTokenModule(
-  promptUserForTokenUsage
+  requestTokenAccessWithTheme,
+  btms
 )
 ```
 
@@ -178,12 +187,13 @@ Permission module for BTMS token operations.
 **Constructor:**
 ```typescript
 new BasicTokenModule(
-  promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
+  requestTokenAccess: (app: string, message: string) => Promise<boolean>,
+  btms: BTMS
 )
 ```
 
 **Parameters:**
-- `promptUserForTokenUsage`: Async function that displays a prompt and returns user's decision
+- `requestTokenAccess`: Async function that displays a prompt and returns user's decision
 
 **Message Format:**
 
@@ -230,7 +240,7 @@ export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({
   const { isFocused, onFocusRequested, onFocusRelinquished } = useContext(UserContext)
   
   // Step 1: Setup token spend prompt with focus handlers
-  const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt({
+  const { promptUser: requestTokenAccess, PromptComponent } = useTokenSpendPrompt({
     isFocused,
     onFocusRequested,
     onFocusRelinquished
@@ -240,9 +250,11 @@ export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({
   const initializeWallet = async () => {
     // ... wallet initialization code ...
     
-    // Step 2: Initialize BasicTokenModule
+    // Step 2: Initialize BTMS + BasicTokenModule
+    const btms = new BTMS({ wallet, networkPreset: 'local' })
     const basicTokenModule = new BasicTokenModule(
-      promptUserForTokenUsage
+      requestTokenAccess,
+      btms
     )
     
     // Step 3: Configure permissions with the module
@@ -282,9 +294,10 @@ export const WalletContextProvider: React.FC<{ children: React.ReactNode }> = ({
 
 ```typescript
 // Simplified for web applications without window focus management
-const { promptUser: promptUserForTokenUsage, PromptComponent } = useTokenSpendPrompt()
+const { promptUser: requestTokenAccess, PromptComponent } = useTokenSpendPrompt()
 
-const basicTokenModule = new BasicTokenModule(promptUserForTokenUsage)
+const btms = new BTMS({ wallet, networkPreset: 'local' })
+const basicTokenModule = new BasicTokenModule(requestTokenAccess, btms)
 
 // Rest of integration is the same...
 ```
@@ -309,7 +322,8 @@ const customPromptFunction = async (app: string, message: string): Promise<boole
   return result // true = approved, false = denied
 }
 
-const basicTokenModule = new BasicTokenModule(customPromptFunction)
+const btms = new BTMS({ wallet, networkPreset: 'local' })
+const basicTokenModule = new BasicTokenModule(customPromptFunction, btms)
 ```
 
 ## Troubleshooting

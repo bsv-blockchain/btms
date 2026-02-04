@@ -20,21 +20,11 @@
       ]
     },
     {
-      "name": "Babbage",
+      "name": "BTMS",
       "provider": "CARS",
       "CARSCloudURL": "https://cars.babbage.systems",
       "projectID": "",
       "network": "mainnet",
-      "deploy": [
-        "backend"
-      ]
-    },
-    {
-      "name": "Babbage testnet",
-      "provider": "CARS",
-      "CARSCloudURL": "https://cars.babbage.systems",
-      "projectID": "",
-      "network": "testnet",
       "deploy": [
         "backend"
       ]

@@ -866,385 +866,6 @@ describe('BTMS', () => {
       expect(mockWallet.calls.getPublicKey.length).toBe(1)
     })
   })
-})
-
-describe('BTMS_BASKET constant', () => {
-  it('should be the single basket for all assets', () => {
-    expect(BTMS_BASKET).toBe('p btms')
-  })
-})
-
-describe('Ownership Proof', () => {
-  const GOLD_ASSET_ID = MOCK_TXID + '.0'
-  const MOCK_VERIFIER_KEY = '03' + 'd'.repeat(64)
-
-  // Helper to create mock UTXOs for testing
-  function createMockUTXOs(amounts: number[]) {
-    return amounts.map((amount, i) => ({
-      outpoint: `${'abcdef'[i % 6].repeat(64)}.0`,
-      txid: 'abcdef'[i % 6].repeat(64) as any,
-      outputIndex: 0,
-      satoshis: 1 as any,
-      lockingScript: 'mock-script' as any,
-      customInstructions: JSON.stringify({
-        derivationPrefix: `prefix-${i}`,
-        derivationSuffix: `suffix-${i}`
-      }),
-      token: {
-        valid: true as const,
-        assetId: GOLD_ASSET_ID,
-        amount,
-        metadata: { name: 'GOLD' },
-        lockingPublicKey: MOCK_IDENTITY_KEY
-      },
-      spendable: true
-    }))
-  }
-
-  describe('proveOwnership', () => {
-    it('should validate asset ID format', async () => {
-      const mockWallet = createMockWallet()
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const result = await btms.proveOwnership('invalid-asset-id', 100, MOCK_VERIFIER_KEY)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('Invalid assetId')
-    })
-
-    it('should validate amount is positive integer', async () => {
-      const mockWallet = createMockWallet()
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, -100, MOCK_VERIFIER_KEY)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('positive integer')
-    })
-
-    it('should validate amount is not fractional', async () => {
-      const mockWallet = createMockWallet()
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, 10.5, MOCK_VERIFIER_KEY)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('positive integer')
-    })
-
-    it('should fail if no tokens found', async () => {
-      const mockWallet = createMockWallet({
-        listOutputsResult: {
-          totalOutputs: 0,
-          outputs: []
-        }
-      })
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, 100, MOCK_VERIFIER_KEY)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('No tokens found')
-    })
-
-    it('should fail if insufficient balance', async () => {
-      const mockWallet = createMockWallet()
-      const btms = new BTMS({ wallet: mockWallet })
-
-      // Mock getSpendableTokens to return controlled UTXOs
-      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: createMockUTXOs([20, 30, 10]) })
-
-      const result = await btms.proveOwnership(GOLD_ASSET_ID, 100, MOCK_VERIFIER_KEY)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('Insufficient balance')
-    })
-
-    it('should select tokens using greedy algorithm', async () => {
-      const mockUTXOs = createMockUTXOs([20, 30, 10])
-      const mockWallet = createMockWallet()
-        // Add revealSpecificKeyLinkage to mock
-        ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue({
-          prover: MOCK_IDENTITY_KEY,
-          verifier: MOCK_VERIFIER_KEY,
-          counterparty: MOCK_IDENTITY_KEY,
-          encryptedLinkage: [1, 2, 3],
-          encryptedLinkageProof: [4, 5, 6],
-          proofType: 1
-        })
-
-      const btms = new BTMS({ wallet: mockWallet })
-
-      // Mock getSpendableTokens to return the UTXOs directly
-      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
-
-      // Mock lookupTokenOnOverlay to return found
-      const originalLookup = (btms as any).lookupTokenOnOverlay
-        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
-
-      try {
-        const result = await btms.proveOwnership(GOLD_ASSET_ID, 31, MOCK_VERIFIER_KEY)
-
-        expect(result.success).toBe(true)
-        expect(result.proof).toBeDefined()
-        expect(result.proof?.tokens.length).toBe(2) // 30 + 20 = 50 >= 31
-        expect(result.proof?.amount).toBe(31)
-        expect(result.proof?.assetId).toBe(GOLD_ASSET_ID)
-        expect(result.proof?.prover).toBe(MOCK_IDENTITY_KEY)
-        expect(result.proof?.verifier).toBe(MOCK_VERIFIER_KEY)
-      } finally {
-        ; (btms as any).lookupTokenOnOverlay = originalLookup
-      }
-    })
-
-    it('should include key linkage for each token', async () => {
-      const mockUTXOs = createMockUTXOs([50]) as any[]
-      const mockWallet = createMockWallet()
-      const mockLinkage = {
-        prover: MOCK_IDENTITY_KEY,
-        verifier: MOCK_VERIFIER_KEY,
-        counterparty: MOCK_IDENTITY_KEY,
-        encryptedLinkage: [1, 2, 3],
-        encryptedLinkageProof: [4, 5, 6],
-        proofType: 1
-      }
-        ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue(mockLinkage)
-
-      const btms = new BTMS({ wallet: mockWallet })
-
-      // Mock getSpendableTokens to return the UTXOs directly
-      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
-
-      // Mock lookupTokenOnOverlay to return found
-      const originalLookup = (btms as any).lookupTokenOnOverlay
-        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
-
-      try {
-        const result = await btms.proveOwnership(GOLD_ASSET_ID, 50, MOCK_VERIFIER_KEY)
-
-        expect(result.success).toBe(true)
-        expect(result.proof?.tokens[0].linkage).toEqual({
-          prover: MOCK_IDENTITY_KEY,
-          verifier: MOCK_VERIFIER_KEY,
-          counterparty: MOCK_IDENTITY_KEY,
-          encryptedLinkage: [1, 2, 3],
-          encryptedLinkageProof: [4, 5, 6],
-          proofType: 1
-        })
-      } finally {
-        ; (btms as any).lookupTokenOnOverlay = originalLookup
-      }
-    })
-  })
-
-  describe('verifyOwnership', () => {
-    it('should reject proof not intended for this verifier', async () => {
-      // Scenario: Alice creates a proof for Bob, but Charlie tries to verify it
-
-      // Charlie's wallet (the one trying to verify)
-      const charlieKey = MOCK_IDENTITY_KEY
-      const charlieWallet = createMockWallet({ identityKey: charlieKey })
-      const charlie = new BTMS({ wallet: charlieWallet })
-
-      // Alice created a proof intended for Bob (not Charlie)
-      const aliceKey = MOCK_RECIPIENT_KEY
-      const bobKey = 'different-verifier-key'
-      const proofFromAliceToBob = {
-        prover: aliceKey,        // Alice is proving
-        verifier: bobKey,        // Proof is intended for Bob
-        tokens: [],
-        amount: 100,
-        assetId: GOLD_ASSET_ID
-      }
-
-      // Charlie tries to verify a proof that was meant for Bob
-      const result = await charlie.verifyOwnership(proofFromAliceToBob as any)
-
-      // Should fail because Charlie is not the intended verifier (Bob is)
-      expect(result.valid).toBe(false)
-      expect(result.error).toContain('not intended for this verifier')
-    })
-
-    it('should reject proof with invalid token', async () => {
-      const mockWallet = createMockWallet({ identityKey: MOCK_IDENTITY_KEY })
-      const btms = new BTMS({ wallet: mockWallet })
-
-      const proof = {
-        prover: MOCK_RECIPIENT_KEY,
-        verifier: MOCK_IDENTITY_KEY,
-        tokens: [{
-          output: {
-            txid: MOCK_TXID,
-            outputIndex: 0,
-            lockingScript: 'invalid-script',
-            satoshis: 1
-          },
-          linkage: {
-            prover: MOCK_RECIPIENT_KEY,
-            verifier: MOCK_IDENTITY_KEY,
-            counterparty: MOCK_RECIPIENT_KEY,
-            encryptedLinkage: [1, 2, 3],
-            encryptedLinkageProof: [4, 5, 6],
-            proofType: 1
-          }
-        }],
-        amount: 100,
-        assetId: GOLD_ASSET_ID
-      }
-
-      const result = await btms.verifyOwnership(proof as any)
-
-      expect(result.valid).toBe(false)
-      expect(result.error).toContain('Invalid token')
-    })
-
-    it('should reject proof with mismatched prover in linkage', async () => {
-      const mockWallet = createMockWallet({ identityKey: MOCK_IDENTITY_KEY })
-      const btms = new BTMS({ wallet: mockWallet })
-
-      // Mock BTMSToken.decode to return a valid token
-      const originalDecode = BTMSToken.decode
-      BTMSToken.decode = jest.fn().mockReturnValue({
-        valid: true,
-        assetId: GOLD_ASSET_ID,
-        amount: 100,
-        lockingPublicKey: MOCK_RECIPIENT_KEY
-      })
-
-      try {
-        const proof = {
-          prover: MOCK_RECIPIENT_KEY,
-          verifier: MOCK_IDENTITY_KEY,
-          tokens: [{
-            output: {
-              txid: MOCK_TXID,
-              outputIndex: 0,
-              lockingScript: 'mock-script',
-              satoshis: 1
-            },
-            linkage: {
-              prover: 'different-prover', // Mismatched prover
-              verifier: MOCK_IDENTITY_KEY,
-              counterparty: MOCK_RECIPIENT_KEY,
-              encryptedLinkage: [1, 2, 3],
-              encryptedLinkageProof: [4, 5, 6],
-              proofType: 1
-            }
-          }],
-          amount: 100,
-          assetId: GOLD_ASSET_ID
-        }
-
-        const result = await btms.verifyOwnership(proof as any)
-
-        expect(result.valid).toBe(false)
-        expect(result.error).toContain('prover')
-      } finally {
-        // Restore original
-        BTMSToken.decode = originalDecode
-      }
-    })
-
-    it('should fail to decrypt linkage encrypted for different verifier (real ProtoWallet)', async () => {
-      // Scenario: Alice creates proof for Bob using real key linkage
-      // Charlie intercepts it and tries to decrypt - should fail cryptographically
-
-      // Create real private keys for Alice, Bob, and Charlie
-      const alicePrivateKey = PrivateKey.fromRandom()
-      const bobPrivateKey = PrivateKey.fromRandom()
-      const charliePrivateKey = PrivateKey.fromRandom()
-
-      // Create ProtoWallets
-      const aliceWallet = new ProtoWallet(alicePrivateKey)
-      const bobWallet = new ProtoWallet(bobPrivateKey)
-      const charlieWallet = new ProtoWallet(charliePrivateKey)
-
-      // Get public keys
-      const aliceKey = alicePrivateKey.toPublicKey().toString()
-      const bobKey = bobPrivateKey.toPublicKey().toString()
-
-      // Alice creates a real key linkage revelation for Bob
-      const protocolID: WalletProtocol = [0, 'p btms']
-      const keyID = '1' // Using '1' for this test since it's testing real ProtoWallet encryption
-
-      const linkageFromAliceToBob = await aliceWallet.revealSpecificKeyLinkage({
-        counterparty: aliceKey, // Self-owned tokens
-        verifier: bobKey,       // Intended for Bob
-        protocolID,
-        keyID
-      })
-
-      // Mock BTMSToken.decode to return a valid token
-      const originalDecode = BTMSToken.decode
-      BTMSToken.decode = jest.fn().mockReturnValue({
-        valid: true,
-        assetId: GOLD_ASSET_ID,
-        amount: 100,
-        lockingPublicKey: aliceKey
-      })
-
-      try {
-        // Create BTMS instance for Charlie
-        const charlie = new BTMS({ wallet: charlieWallet as any })
-
-        // Alice's proof intended for Bob (with real encrypted linkage)
-        const proofFromAliceToBob = {
-          prover: aliceKey,
-          verifier: bobKey,  // Intended for Bob, not Charlie
-          tokens: [{
-            output: {
-              txid: MOCK_TXID,
-              outputIndex: 0,
-              lockingScript: 'mock-script',
-              satoshis: 1
-            },
-            linkage: {
-              prover: linkageFromAliceToBob.prover,
-              verifier: linkageFromAliceToBob.verifier,
-              counterparty: linkageFromAliceToBob.counterparty,
-              encryptedLinkage: linkageFromAliceToBob.encryptedLinkage,
-              encryptedLinkageProof: linkageFromAliceToBob.encryptedLinkageProof,
-              proofType: linkageFromAliceToBob.proofType
-            }
-          }],
-          amount: 100,
-          assetId: GOLD_ASSET_ID
-        }
-
-          // Mock lookupTokenOnOverlay to pass
-          ; (charlie as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
-
-        // Charlie tries to verify by pretending to be Bob (bypassing verifier check)
-        const originalGetIdentityKey = charlie.getIdentityKey
-        charlie.getIdentityKey = jest.fn().mockResolvedValue(bobKey)
-
-        const result = await charlie.verifyOwnership(proofFromAliceToBob as any)
-
-        // Should fail because Charlie derives the wrong shared secret
-        // Charlie derives: ECDH(Charlie's private key, Alice's public key) = wrong shared secret
-        // Linkage encrypted with: ECDH(Bob's private key, Alice's public key) = correct shared secret
-        // Different ECDH points -> AES-GCM decryption fails (authentication error)
-        expect(result.valid).toBe(false)
-        expect(result.error).toBeDefined()
-
-        // Restore
-        charlie.getIdentityKey = originalGetIdentityKey
-
-        // BONUS: Verify Bob CAN successfully decrypt the same linkage
-        const bob = new BTMS({ wallet: bobWallet as any })
-          ; (bob as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
-
-        const bobResult = await bob.verifyOwnership(proofFromAliceToBob as any)
-
-        // Bob should succeed because he has the correct private key
-        expect(bobResult.valid).toBe(true)
-        expect(bobResult.amount).toBe(100)
-        expect(bobResult.prover).toBe(aliceKey)
-      } finally {
-        BTMSToken.decode = originalDecode
-      }
-    })
-  })
 
   describe('accept', () => {
     it('should throw error when token not on overlay and broadcast fails', async () => {
@@ -1868,4 +1489,387 @@ describe('Ownership Proof', () => {
       }
     })
   })
+})
+
+describe('BTMS_BASKET constant', () => {
+  it('should be the single basket for all assets', () => {
+    expect(BTMS_BASKET).toBe('p btms')
+  })
+})
+
+describe('Ownership Proof', () => {
+  const GOLD_ASSET_ID = MOCK_TXID + '.0'
+  const MOCK_VERIFIER_KEY = '03' + 'd'.repeat(64)
+
+  // Helper to create mock UTXOs for testing
+  function createMockUTXOs(amounts: number[]) {
+    return amounts.map((amount, i) => ({
+      outpoint: `${'abcdef'[i % 6].repeat(64)}.0`,
+      txid: 'abcdef'[i % 6].repeat(64) as any,
+      outputIndex: 0,
+      satoshis: 1 as any,
+      lockingScript: 'mock-script' as any,
+      customInstructions: JSON.stringify({
+        derivationPrefix: `prefix-${i}`,
+        derivationSuffix: `suffix-${i}`
+      }),
+      token: {
+        valid: true as const,
+        assetId: GOLD_ASSET_ID,
+        amount,
+        metadata: { name: 'GOLD' },
+        lockingPublicKey: MOCK_IDENTITY_KEY
+      },
+      spendable: true
+    }))
+  }
+
+  describe('proveOwnership', () => {
+    it('should validate asset ID format', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.proveOwnership('invalid-asset-id', 100, MOCK_VERIFIER_KEY)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Invalid assetId')
+    })
+
+    it('should validate amount is positive integer', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.proveOwnership(GOLD_ASSET_ID, -100, MOCK_VERIFIER_KEY)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('positive integer')
+    })
+
+    it('should validate amount is not fractional', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.proveOwnership(GOLD_ASSET_ID, 10.5, MOCK_VERIFIER_KEY)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('positive integer')
+    })
+
+    it('should fail if no tokens found', async () => {
+      const mockWallet = createMockWallet({
+        listOutputsResult: {
+          totalOutputs: 0,
+          outputs: []
+        }
+      })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const result = await btms.proveOwnership(GOLD_ASSET_ID, 100, MOCK_VERIFIER_KEY)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('No tokens found')
+    })
+
+    it('should fail if insufficient balance', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock getSpendableTokens to return controlled UTXOs
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: createMockUTXOs([20, 30, 10]) })
+
+      const result = await btms.proveOwnership(GOLD_ASSET_ID, 100, MOCK_VERIFIER_KEY)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Insufficient balance')
+    })
+
+    it('should select tokens using greedy algorithm', async () => {
+      const mockUTXOs = createMockUTXOs([20, 30, 10])
+      const mockWallet = createMockWallet()
+        // Add revealSpecificKeyLinkage to mock
+        ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue({
+          prover: MOCK_IDENTITY_KEY,
+          verifier: MOCK_VERIFIER_KEY,
+          counterparty: MOCK_IDENTITY_KEY,
+          encryptedLinkage: [1, 2, 3],
+          encryptedLinkageProof: [4, 5, 6],
+          proofType: 1
+        })
+
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock getSpendableTokens to return the UTXOs directly
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
+
+      // Mock lookupTokenOnOverlay to return found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      try {
+        const result = await btms.proveOwnership(GOLD_ASSET_ID, 31, MOCK_VERIFIER_KEY)
+
+        expect(result.success).toBe(true)
+        expect(result.proof).toBeDefined()
+        expect(result.proof?.tokens.length).toBe(2) // 30 + 20 = 50 >= 31
+        expect(result.proof?.amount).toBe(31)
+        expect(result.proof?.assetId).toBe(GOLD_ASSET_ID)
+        expect(result.proof?.prover).toBe(MOCK_IDENTITY_KEY)
+        expect(result.proof?.verifier).toBe(MOCK_VERIFIER_KEY)
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+      }
+    })
+
+    it('should include key linkage for each token', async () => {
+      const mockUTXOs = createMockUTXOs([50]) as any[]
+      const mockWallet = createMockWallet()
+      const mockLinkage = {
+        prover: MOCK_IDENTITY_KEY,
+        verifier: MOCK_VERIFIER_KEY,
+        counterparty: MOCK_IDENTITY_KEY,
+        encryptedLinkage: [1, 2, 3],
+        encryptedLinkageProof: [4, 5, 6],
+        proofType: 1
+      }
+        ; (mockWallet as any).revealSpecificKeyLinkage = jest.fn().mockResolvedValue(mockLinkage)
+
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock getSpendableTokens to return the UTXOs directly
+      btms.getSpendableTokens = jest.fn().mockResolvedValue({ tokens: mockUTXOs })
+
+      // Mock lookupTokenOnOverlay to return found
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      try {
+        const result = await btms.proveOwnership(GOLD_ASSET_ID, 50, MOCK_VERIFIER_KEY)
+
+        expect(result.success).toBe(true)
+        expect(result.proof?.tokens[0].linkage).toEqual({
+          prover: MOCK_IDENTITY_KEY,
+          verifier: MOCK_VERIFIER_KEY,
+          counterparty: MOCK_IDENTITY_KEY,
+          encryptedLinkage: [1, 2, 3],
+          encryptedLinkageProof: [4, 5, 6],
+          proofType: 1
+        })
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
+      }
+    })
+  })
+
+  describe('verifyOwnership', () => {
+    it('should reject proof not intended for this verifier', async () => {
+      // Scenario: Alice creates a proof for Bob, but Charlie tries to verify it
+
+      // Charlie's wallet (the one trying to verify)
+      const charlieKey = MOCK_IDENTITY_KEY
+      const charlieWallet = createMockWallet({ identityKey: charlieKey })
+      const charlie = new BTMS({ wallet: charlieWallet })
+
+      // Alice created a proof intended for Bob (not Charlie)
+      const aliceKey = MOCK_RECIPIENT_KEY
+      const bobKey = 'different-verifier-key'
+      const proofFromAliceToBob = {
+        prover: aliceKey,        // Alice is proving
+        verifier: bobKey,        // Proof is intended for Bob
+        tokens: [],
+        amount: 100,
+        assetId: GOLD_ASSET_ID
+      }
+
+      // Charlie tries to verify a proof that was meant for Bob
+      const result = await charlie.verifyOwnership(proofFromAliceToBob as any)
+
+      // Should fail because Charlie is not the intended verifier (Bob is)
+      expect(result.valid).toBe(false)
+      expect(result.error).toContain('not intended for this verifier')
+    })
+
+    it('should reject proof with invalid token', async () => {
+      const mockWallet = createMockWallet({ identityKey: MOCK_IDENTITY_KEY })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const proof = {
+        prover: MOCK_RECIPIENT_KEY,
+        verifier: MOCK_IDENTITY_KEY,
+        tokens: [{
+          output: {
+            txid: MOCK_TXID,
+            outputIndex: 0,
+            lockingScript: 'invalid-script',
+            satoshis: 1
+          },
+          keyID: 'test-key',
+          linkage: {
+            prover: MOCK_RECIPIENT_KEY,
+            verifier: MOCK_IDENTITY_KEY,
+            counterparty: MOCK_RECIPIENT_KEY,
+            encryptedLinkage: [1, 2, 3],
+            encryptedLinkageProof: [4, 5, 6],
+            proofType: 1
+          }
+        }],
+        amount: 100,
+        assetId: GOLD_ASSET_ID
+      }
+
+      const result = await btms.verifyOwnership(proof as any)
+
+      expect(result.valid).toBe(false)
+      expect(result.error).toContain('Invalid token')
+    })
+
+    it('should reject proof with mismatched prover in linkage', async () => {
+      const mockWallet = createMockWallet({ identityKey: MOCK_IDENTITY_KEY })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      // Mock BTMSToken.decode to return a valid token
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: GOLD_ASSET_ID,
+        amount: 100,
+        lockingPublicKey: MOCK_RECIPIENT_KEY
+      })
+
+      try {
+        const proof = {
+          prover: MOCK_RECIPIENT_KEY,
+          verifier: MOCK_IDENTITY_KEY,
+          tokens: [{
+            output: {
+              txid: MOCK_TXID,
+              outputIndex: 0,
+              lockingScript: 'mock-script',
+              satoshis: 1
+            },
+            keyID: 'test-key',
+            linkage: {
+              prover: 'different-prover', // Mismatched prover
+              verifier: MOCK_IDENTITY_KEY,
+              counterparty: MOCK_RECIPIENT_KEY,
+              encryptedLinkage: [1, 2, 3],
+              encryptedLinkageProof: [4, 5, 6],
+              proofType: 1
+            }
+          }],
+          amount: 100,
+          assetId: GOLD_ASSET_ID
+        }
+
+        const result = await btms.verifyOwnership(proof as any)
+
+        expect(result.valid).toBe(false)
+        expect(result.error).toContain('prover')
+      } finally {
+        // Restore original
+        BTMSToken.decode = originalDecode
+      }
+    })
+
+    it('should fail to decrypt linkage encrypted for different verifier (real ProtoWallet)', async () => {
+      // Scenario: Alice creates proof for Bob using real key linkage
+      // Charlie intercepts it and tries to decrypt - should fail cryptographically
+
+      // Create real private keys for Alice, Bob, and Charlie
+      const alicePrivateKey = PrivateKey.fromRandom()
+      const bobPrivateKey = PrivateKey.fromRandom()
+      const charliePrivateKey = PrivateKey.fromRandom()
+
+      // Create ProtoWallets
+      const aliceWallet = new ProtoWallet(alicePrivateKey)
+      const bobWallet = new ProtoWallet(bobPrivateKey)
+      const charlieWallet = new ProtoWallet(charliePrivateKey)
+
+      // Get public keys
+      const aliceKey = alicePrivateKey.toPublicKey().toString()
+      const bobKey = bobPrivateKey.toPublicKey().toString()
+
+      // Alice creates a real key linkage revelation for Bob
+      const protocolID: WalletProtocol = [0, 'p btms']
+      const keyID = '1' // Using '1' for this test since it's testing real ProtoWallet encryption
+
+      const linkageFromAliceToBob = await aliceWallet.revealSpecificKeyLinkage({
+        counterparty: aliceKey, // Self-owned tokens
+        verifier: bobKey,       // Intended for Bob
+        protocolID,
+        keyID
+      })
+
+      // Mock BTMSToken.decode to return a valid token
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: GOLD_ASSET_ID,
+        amount: 100,
+        lockingPublicKey: aliceKey
+      })
+
+      try {
+        // Create BTMS instance for Charlie
+        const charlie = new BTMS({ wallet: charlieWallet as any })
+
+        // Alice's proof intended for Bob (with real encrypted linkage)
+        const proofFromAliceToBob = {
+          prover: aliceKey,
+          verifier: bobKey,  // Intended for Bob, not Charlie
+          tokens: [{
+            output: {
+              txid: MOCK_TXID,
+              outputIndex: 0,
+              lockingScript: 'mock-script',
+              satoshis: 1
+            },
+            keyID,
+            linkage: {
+              prover: linkageFromAliceToBob.prover,
+              verifier: linkageFromAliceToBob.verifier,
+              counterparty: linkageFromAliceToBob.counterparty,
+              encryptedLinkage: linkageFromAliceToBob.encryptedLinkage,
+              encryptedLinkageProof: linkageFromAliceToBob.encryptedLinkageProof,
+              proofType: linkageFromAliceToBob.proofType
+            }
+          }],
+          amount: 100,
+          assetId: GOLD_ASSET_ID
+        }
+
+          // Mock lookupTokenOnOverlay to pass
+          ; (charlie as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+        // Charlie tries to verify by pretending to be Bob (bypassing verifier check)
+        const originalGetIdentityKey = charlie.getIdentityKey
+        charlie.getIdentityKey = jest.fn().mockResolvedValue(bobKey)
+
+        const result = await charlie.verifyOwnership(proofFromAliceToBob as any)
+
+        // Should fail because Charlie derives the wrong shared secret
+        // Charlie derives: ECDH(Charlie's private key, Alice's public key) = wrong shared secret
+        // Linkage encrypted with: ECDH(Bob's private key, Alice's public key) = correct shared secret
+        // Different ECDH points -> AES-GCM decryption fails (authentication error)
+        expect(result.valid).toBe(false)
+        expect(result.error).toBeDefined()
+
+        // Restore
+        charlie.getIdentityKey = originalGetIdentityKey
+
+        // BONUS: Verify Bob CAN successfully decrypt the same linkage
+        const bob = new BTMS({ wallet: bobWallet as any })
+          ; (bob as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+        const bobResult = await bob.verifyOwnership(proofFromAliceToBob as any)
+
+        // Bob should succeed because he has the correct private key
+        expect(bobResult.valid).toBe(true)
+        expect(bobResult.amount).toBe(100)
+        expect(bobResult.prover).toBe(aliceKey)
+      } finally {
+        BTMSToken.decode = originalDecode
+      }
+    })
+  })
+
 })

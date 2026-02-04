@@ -39,9 +39,6 @@ export const BTMS_MESSAGE_BOX = 'btms_tokens'
  */
 export const BTMS_PROTOCOL_ID: WalletProtocol = [0, 'p btms']
 
-/** Default key ID for BTMS operations */
-export const BTMS_KEY_ID = '1'
-
 // ---------------------------------------------------------------------------
 // Basket Constants
 // ---------------------------------------------------------------------------

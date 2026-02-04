@@ -14,4 +14,14 @@ You can start a new coin by ISSUEing an amount. Then in a subsequent transaction
 
 The rule is that you cannot have outputs with amounts that total to more than the inputs you are spending from, for any given asset.
 
-The number of satoshis in each output must be at least 1, but beyond that it is not considered.`
+The number of satoshis in each output must be at least 1, but beyond that it is not considered.
+
+## Topic Manager Rules (Enforced)
+
+- **Issuance**: Outputs with assetId = "ISSUE" are always admissible. Their canonical assetId becomes "<txid>.<vout>".
+- **Transfers**: For each assetId, total output amount must not exceed total input amount for that asset.
+- **Metadata immutability**: If an input carries metadata, outputs for that asset must carry the exact same metadata.
+- **Splits/Merges**: Splitting or merging is allowed as long as the per-asset total is conserved and metadata matches.
+- **Burning**: If fewer outputs are created for an asset than inputs provide, the difference is burned. If no outputs are created for an asset, the entire balance is burned.
+- **Multi-asset**: Each asset is evaluated independently; violations on one asset do not confer validity to another.
+- **Coins retained**: Inputs are retained only for assets that appear in admitted outputs; otherwise they are removed.`

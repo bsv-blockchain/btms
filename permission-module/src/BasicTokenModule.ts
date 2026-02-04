@@ -1,88 +1,7 @@
 import { CreateActionArgs, CreateActionResult, CreateSignatureArgs, Hash, ListActionsArgs, LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { PermissionsModule } from '@bsv/wallet-toolbox-client'
-import { BTMS } from '../../core'
-
-// ---------------------------------------------------------------------------
-// BTMS Permission Module Constants
-// ---------------------------------------------------------------------------
-// BRC-99: Baskets prefixed with "p " are permissioned and require wallet
-// permission module support. The scheme ID is "btms".
-//
-// Token basket format: "p btms <assetId>"
-// Example: "p btms abc123def456.0"
-// ---------------------------------------------------------------------------
-
-/** Permissioned basket prefix - aligns with btms-core */
-const P_BASKET_PREFIX = 'p btms'
-
-/** Literal used in field[0] to indicate token issuance - aligns with btms-core */
-const ISSUE_MARKER = 'ISSUE'
-
-/** Index positions for BTMS PushDrop token fields */
-const BTMS_FIELD = {
-  ASSET_ID: 0,
-  AMOUNT: 1,
-  METADATA: 2
-} as const
-
-/**
- * Parsed information about a BTMS token from its locking script
- */
-interface ParsedTokenInfo {
-  assetId: string
-  amount: number
-  metadata?: {
-    name?: string
-    description?: string
-    iconURL?: string
-    [key: string]: unknown
-  }
-}
-
-/**
- * Comprehensive token spend information extracted from createAction args
- */
-interface TokenSpendInfo {
-  /** Total amount being sent to recipient (not including change) */
-  sendAmount: number
-  /** Total amount being spent from inputs */
-  totalInputAmount: number
-  /** Change amount (totalInputAmount - sendAmount) */
-  changeAmount: number
-  /** Total amount sent in token outputs (derived from outputs) */
-  outputSendAmount: number
-  /** Total amount returned as change in token outputs (derived from outputs) */
-  outputChangeAmount: number
-  /** Whether any token outputs were parsed */
-  hasTokenOutputs: boolean
-  /** Source of totalInputAmount */
-  inputAmountSource: 'beef' | 'descriptions' | 'derived' | 'none'
-  /** Token name from metadata */
-  tokenName: string
-  /** Asset ID */
-  assetId: string
-  /** Recipient identity key (truncated) */
-  recipient?: string
-  /** Token icon URL if available */
-  iconURL?: string
-  /** Full action description */
-  actionDescription: string
-}
-
-/**
- * Authorized transaction data captured from createAction response.
- * Used to verify createSignature calls are signing what was actually authorized.
- */
-interface AuthorizedTransaction {
-  /** The reference from the signable transaction */
-  reference: string
-  /** Hash of all outputs (BIP-143 hashOutputs) */
-  hashOutputs: string
-  /** Set of authorized outpoints (txid.vout format) */
-  authorizedOutpoints: Set<string>
-  /** Timestamp when this authorization was created */
-  timestamp: number
-}
+import { BTMS, ISSUE_MARKER } from '../../core'
+import { AuthorizedTransaction, TokenSpendInfo, P_BASKET_PREFIX, BTMS_FIELD, ParsedTokenInfo } from './types'
 
 /**
  * BasicTokenModule - BTMS Permission Module
@@ -115,8 +34,8 @@ interface AuthorizedTransaction {
  * - Short signatures (<157 bytes) are assumed to be issuance
  */
 export class BasicTokenModule implements PermissionsModule {
-  private readonly promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>
-  private readonly btms?: BTMS
+  private readonly requestTokenAccess: (app: string, message: string) => Promise<boolean>
+  private readonly btms: BTMS
 
   /**
    * Session-based authorization tracking.
@@ -144,19 +63,19 @@ export class BasicTokenModule implements PermissionsModule {
   /**
    * Creates a new BasicTokenModule instance.
    * 
-   * @param promptUserForTokenUsage - Callback to prompt user for token spending approval.
+   * @param requestTokenAccess - Callback to prompt user for token spending approval.
    *   Should return true if user approves, false if denied.
    *   SECURITY: This callback MUST be implemented securely to prevent UI spoofing.
    * @param btms - BTMS instance for fetching token metadata via getAssetInfo
    */
   constructor(
-    promptUserForTokenUsage: (app: string, message: string) => Promise<boolean>,
-    btms?: BTMS
+    requestTokenAccess: (app: string, message: string) => Promise<boolean>,
+    btms: BTMS
   ) {
-    if (!promptUserForTokenUsage || typeof promptUserForTokenUsage !== 'function') {
-      throw new Error('promptUserForTokenUsage callback is required')
+    if (!requestTokenAccess || typeof requestTokenAccess !== 'function') {
+      throw new Error('requestTokenAccess callback is required')
     }
-    this.promptUserForTokenUsage = promptUserForTokenUsage
+    this.requestTokenAccess = requestTokenAccess
     this.btms = btms
 
     // Start periodic cleanup of expired sessions
@@ -221,8 +140,6 @@ export class BasicTokenModule implements PermissionsModule {
     } else if (method === 'listOutputs') {
       await this.handleListOutputs(args, originator)
     }
-    // For internalizeAction, relinquishOutput - pass through
-    // The WalletPermissionsManager already delegates these to us for P-baskets
 
     return { args }
   }
@@ -395,59 +312,65 @@ export class BasicTokenModule implements PermissionsModule {
 
     // Extract token spend information for user prompt
     const spendInfo = this.extractTokenSpendInfo(args)
+    const enrichedSpendInfo = await this.enrichSpendInfoWithMetadata(spendInfo, spendInfo.assetId)
+    const actionClassification = this.classifyTokenAction(enrichedSpendInfo)
 
-    let labelAssetId: string | undefined
-    if (Array.isArray(args.labels)) {
-      for (const label of args.labels) {
-        if (typeof label === 'string') {
-          const match = label.match(/^p btms assetId (.+)$/)
-          if (match && match[1]) {
-            labelAssetId = match[1]
-            break
-          }
-        }
-      }
-    }
-
-    let enrichedSpendInfo = spendInfo
-    const resolvedAssetId = spendInfo.assetId || labelAssetId
-    if (resolvedAssetId) {
-      const meta = await this.getAssetMetadata(resolvedAssetId)
-      enrichedSpendInfo = {
-        ...spendInfo,
-        assetId: resolvedAssetId,
-        tokenName: meta?.name || spendInfo.tokenName,
-        iconURL: meta?.iconURL || spendInfo.iconURL
-      }
-    }
-
-    const inputAmountReliable = enrichedSpendInfo.inputAmountSource === 'beef'
-    const burnAmount = inputAmountReliable
-      ? Math.max(
-        0,
-        enrichedSpendInfo.totalInputAmount
-        - enrichedSpendInfo.outputChangeAmount
-        - enrichedSpendInfo.outputSendAmount
-      )
-      : 0
-
-    if (burnAmount > 0 && enrichedSpendInfo.outputSendAmount > 0) {
+    if (actionClassification.isInvalidBurn) {
       throw new Error('Burn transactions must not send tokens to a recipient')
     }
 
-    const isBurn = inputAmountReliable && burnAmount > 0 && enrichedSpendInfo.outputSendAmount === 0
-
-    if (isBurn) {
+    if (actionClassification.isBurn) {
       await this.promptForTokenBurn(originator, {
         ...enrichedSpendInfo,
         sendAmount: 0,
-        totalInputAmount: burnAmount
+        totalInputAmount: actionClassification.burnAmount
       })
-    } else if (enrichedSpendInfo.sendAmount > 0 || enrichedSpendInfo.totalInputAmount > 0) {
+      return
+    }
+
+    if (enrichedSpendInfo.sendAmount > 0 || enrichedSpendInfo.totalInputAmount > 0) {
       await this.promptForTokenSpend(originator, enrichedSpendInfo)
-    } else {
-      // Fallback to generic prompt if we can't parse token details
-      await this.promptForGenericAuthorization(originator)
+      return
+    }
+
+    // Fallback to generic prompt if we can't parse token details
+    await this.promptForGenericAuthorization(originator)
+  }
+
+  private async enrichSpendInfoWithMetadata(
+    spendInfo: TokenSpendInfo,
+    assetId?: string
+  ): Promise<TokenSpendInfo> {
+    if (!assetId) return spendInfo
+
+    const meta = await this.getAssetMetadata(assetId)
+    return {
+      ...spendInfo,
+      assetId,
+      tokenName: meta?.name || spendInfo.tokenName,
+      iconURL: meta?.iconURL || spendInfo.iconURL
+    }
+  }
+
+  private classifyTokenAction(spendInfo: TokenSpendInfo): {
+    burnAmount: number
+    isBurn: boolean
+    isInvalidBurn: boolean
+  } {
+    const inputAmountReliable = spendInfo.inputAmountSource === 'beef'
+    const burnAmount = inputAmountReliable
+      ? Math.max(
+        0,
+        spendInfo.totalInputAmount - spendInfo.outputChangeAmount - spendInfo.outputSendAmount
+      )
+      : 0
+    const isInvalidBurn = burnAmount > 0 && spendInfo.outputSendAmount > 0
+    const isBurn = inputAmountReliable && burnAmount > 0 && spendInfo.outputSendAmount === 0
+
+    return {
+      burnAmount,
+      isBurn,
+      isInvalidBurn
     }
   }
 
@@ -641,7 +564,7 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     const message = JSON.stringify(promptData)
-    const approved = await this.promptUserForTokenUsage(originator, message)
+    const approved = await this.requestTokenAccess(originator, message)
 
     if (!approved) {
       throw new Error('User denied permission to spend tokens')
@@ -672,7 +595,7 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     const message = JSON.stringify(promptData)
-    const approved = await this.promptUserForTokenUsage(originator, message)
+    const approved = await this.requestTokenAccess(originator, message)
 
     if (!approved) {
       throw new Error('User denied permission to burn tokens')
@@ -696,7 +619,7 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     const message = `Spend BTMS tokens\n\nApp: ${originator}`
-    const approved = await this.promptUserForTokenUsage(originator, message)
+    const approved = await this.requestTokenAccess(originator, message)
 
     if (!approved) {
       throw new Error('User denied permission to spend BTMS tokens')
@@ -1077,7 +1000,7 @@ export class BasicTokenModule implements PermissionsModule {
     }
 
     const message = JSON.stringify(promptData)
-    const approved = await this.promptUserForTokenUsage(originator, message)
+    const approved = await this.requestTokenAccess(originator, message)
 
     if (!approved) {
       throw new Error('User denied permission to access BTMS tokens')
@@ -1093,8 +1016,6 @@ export class BasicTokenModule implements PermissionsModule {
    * @returns Token metadata or null if not found
    */
   private async getAssetMetadata(assetId: string): Promise<{ name?: string; iconURL?: string } | null> {
-    if (!this.btms) return null
-
     try {
       const info = await this.btms.getAssetInfo(assetId)
       if (info) {

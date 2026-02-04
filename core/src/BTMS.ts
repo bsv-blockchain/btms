@@ -62,7 +62,6 @@ import {
   BTMS_TOPIC,
   BTMS_LOOKUP_SERVICE,
   BTMS_PROTOCOL_ID,
-  BTMS_KEY_ID,
   BTMS_BASKET,
   BTMS_LABEL_PREFIX,
   BTMS_MESSAGE_BOX,
@@ -1420,8 +1419,11 @@ export class BTMS {
       const provenTokens: ProvenToken[] = []
 
       for (const utxo of selected) {
-        const { keyID, senderIdentityKey } = parseCustomInstructions(utxo.customInstructions, utxo.txid, utxo.outputIndex)
-        const counterparty = senderIdentityKey ?? 'self'
+        const { keyID } = parseCustomInstructions(
+          utxo.customInstructions,
+          utxo.txid,
+          utxo.outputIndex
+        )
 
         // Reveal specific key linkage for this token
         // The counterparty is 'self' for tokens we own (resolved to our own key)
@@ -1439,6 +1441,7 @@ export class BTMS {
             lockingScript: utxo.lockingScript,
             satoshis: utxo.satoshis
           },
+          keyID,
           linkage: {
             prover: linkageResult.prover as PubKeyHex,
             verifier: linkageResult.verifier as PubKeyHex,
@@ -1524,6 +1527,15 @@ export class BTMS {
           throw new Error('Token linkage prover does not match proof prover')
         }
 
+        // Verify the token exists on the overlay first
+        const lookupResult = await this.lookupTokenOnOverlay(
+          provenToken.output.txid,
+          provenToken.output.outputIndex
+        )
+        if (!lookupResult.found) {
+          throw new Error('Token not found on overlay')
+        }
+
         // Decrypt the linkage to verify the prover owns the key
         // The verifier decrypts using their key and the prover as counterparty
         const { plaintext: linkage } = await this.wallet.decrypt({
@@ -1532,7 +1544,7 @@ export class BTMS {
             2,
             `specific linkage revelation ${BTMS_PROTOCOL_ID[0]} ${BTMS_PROTOCOL_ID[1]}`
           ],
-          keyID: BTMS_KEY_ID, // Standard keyID for linkage verification
+          keyID: provenToken.keyID,
           counterparty: proof.prover
         })
 
@@ -1540,15 +1552,6 @@ export class BTMS {
         // it proves the prover has the corresponding private key
         if (!linkage || linkage.length === 0) {
           throw new Error('Invalid key linkage for token')
-        }
-
-        // Verify the token exists on the overlay
-        const lookupResult = await this.lookupTokenOnOverlay(
-          provenToken.output.txid,
-          provenToken.output.outputIndex
-        )
-        if (!lookupResult.found) {
-          throw new Error('Token not found on overlay')
         }
 
         // Add to proven amount

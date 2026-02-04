@@ -20,7 +20,7 @@ import {
 } from '@bsv/sdk'
 
 import type { BTMSTokenDecodeResult, DecodedBTMSToken } from './types.js'
-import { BTMS_PROTOCOL_ID, BTMS_KEY_ID, ISSUE_MARKER, MIN_TOKEN_AMOUNT, MAX_TOKEN_AMOUNT } from './constants.js'
+import { BTMS_PROTOCOL_ID, ISSUE_MARKER, MIN_TOKEN_AMOUNT, MAX_TOKEN_AMOUNT } from './constants.js'
 
 /**
  * BTMSToken handles encoding and decoding of BTMS PushDrop tokens.
