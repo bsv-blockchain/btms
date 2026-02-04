@@ -14,8 +14,7 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
   chunks.push({ op: 0xac }) // OP_CHECKSIG
 
   // Push fields
-  const fieldsWithSignature = [...fields, 'mock_signature']
-  for (const field of fieldsWithSignature) {
+  for (const field of fields) {
     const data = Utils.toArray(field, 'utf8')
     if (data.length <= 75) {
       chunks.push({ op: data.length, data })
@@ -27,7 +26,7 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
   }
 
   // Drop fields
-  let remaining = fieldsWithSignature.length
+  let remaining = fields.length
   while (remaining > 1) {
     chunks.push({ op: 0x6d }) // OP_2DROP
     remaining -= 2

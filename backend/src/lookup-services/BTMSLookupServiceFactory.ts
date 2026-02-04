@@ -31,9 +31,9 @@ class BTMSLookupService implements LookupService {
     try {
       const decoded = PushDrop.decode(lockingScript)
 
-      // BTMS tokens have 3-4 fields: [assetId, amount, metadata?, signature]
-      if (decoded.fields.length < 3 || decoded.fields.length > 4) {
-        throw new Error(`BTMS token must have 3-4 fields including signature, got ${decoded.fields.length}`)
+      // BTMS tokens have 2-3 fields: [assetId, amount, metadata?]
+      if (decoded.fields.length < 2 || decoded.fields.length > 3) {
+        throw new Error(`BTMS token must have 2-3 fields, got ${decoded.fields.length}`)
       }
 
       const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
@@ -48,7 +48,7 @@ class BTMSLookupService implements LookupService {
       }
 
       // Extract metadata if present
-      const metadata = decoded.fields.length === 4
+      const metadata = decoded.fields[btmsProtocol.metadata]
         ? Utils.toUTF8(decoded.fields[btmsProtocol.metadata])
         : undefined
 

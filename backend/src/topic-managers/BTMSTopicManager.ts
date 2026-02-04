@@ -83,7 +83,7 @@ export default class BTMSTopicManager implements TopicManager {
           }
 
           const amount = Number(Utils.toUTF8(decoded.fields[1]))
-          const metadata = decoded.fields.length === 4 ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
 
           // Track the amounts for previous UTXOs
           if (!maxNumberOfEachAsset[assetId]) {
@@ -127,7 +127,7 @@ export default class BTMSTopicManager implements TopicManager {
           assetTotals[assetId] += amount
 
           // Validate the amount and metadata
-          const metadata = decoded.fields.length === 4 ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
           if (!maxNumberOfEachAsset[assetId]) {
             continue
           }
