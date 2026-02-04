@@ -83,6 +83,7 @@ export type {
   IssueResult,
   SendResult,
   AcceptResult,
+  RefundResult,
   BurnResult,
 
   // Configuration types

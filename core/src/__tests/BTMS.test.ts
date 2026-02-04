@@ -191,6 +191,115 @@ describe('BTMS', () => {
     })
   })
 
+  describe('refundIncoming', () => {
+    it('should return error when comms layer is missing', async () => {
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        beef: createMockAtomicBEEF(MOCK_TXID),
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      }
+
+      const result = await btms.refundIncoming(incomingToken)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Comms layer')
+    })
+
+    it('should refund incoming token and acknowledge message', async () => {
+      jest.useFakeTimers()
+      jest.setSystemTime(new Date('2026-01-15T00:00:00.000Z'))
+      const mockWallet = createMockWallet()
+      const mockComms = {
+        sendMessage: jest.fn().mockResolvedValue('msg-456'),
+        acknowledgeMessage: jest.fn().mockResolvedValue(undefined)
+      }
+      const btms = new BTMS({ wallet: mockWallet, comms: mockComms as any })
+
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+        ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({
+          found: true,
+          beef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const incomingToken = {
+        txid: MOCK_TXID as any,
+        outputIndex: 0,
+        lockingScript: '00' as any,
+        amount: 100,
+        assetId: `${MOCK_TXID}.0`,
+        sender: MOCK_RECIPIENT_KEY as any,
+        messageId: 'msg-123',
+        satoshis: 1,
+        beef: createMockAtomicBEEF(MOCK_TXID),
+        customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' })
+      }
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: `${MOCK_TXID}.0`,
+        amount: 100,
+        metadata: undefined,
+        lockingPublicKey: MOCK_IDENTITY_KEY
+      })
+
+      const mockTx = { id: jest.fn().mockReturnValue(MOCK_TXID) }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      mockTopicBroadcasterBroadcast.mockResolvedValue({ status: 'success' })
+
+      try {
+        const result = await btms.refundIncoming(incomingToken)
+
+        expect(result.success).toBe(true)
+        expect(result.assetId).toBe(`${MOCK_TXID}.0`)
+        expect(result.amount).toBe(100)
+        expect(mockComms.sendMessage).toHaveBeenCalledTimes(1)
+        expect(mockComms.acknowledgeMessage).toHaveBeenCalledWith({ messageIds: ['msg-123'] })
+
+        const createActionCall = mockWallet.calls.createAction[0] as CreateActionArgs
+        expect(createActionCall.labels).toEqual([
+          `${BTMS_LABEL_PREFIX}type send`,
+          `${BTMS_LABEL_PREFIX}direction outgoing`,
+          MOCK_TIMESTAMP_LABEL,
+          MOCK_MONTH_LABEL,
+          `${BTMS_LABEL_PREFIX}assetId ${MOCK_TXID}.0`,
+          `${BTMS_LABEL_PREFIX}counterparty ${MOCK_RECIPIENT_KEY}`
+        ])
+
+        const messageCall = mockComms.sendMessage.mock.calls[0][0]
+        const messageBody = JSON.parse(messageCall.body)
+        expect(messageCall.recipient).toBe(MOCK_RECIPIENT_KEY)
+        expect(messageCall.messageBox).toBe('btms_tokens')
+        expect(messageBody.assetId).toBe(`${MOCK_TXID}.0`)
+        expect(messageBody.amount).toBe(100)
+      } finally {
+        jest.useRealTimers()
+          ; (btms as any).lookupTokenOnOverlay = originalLookup
+        BTMSToken.decode = originalDecode
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+  })
+
   describe('setOriginator', () => {
     it('should set originator for wallet calls', async () => {
       const mockWallet = createMockWallet()

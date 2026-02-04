@@ -406,6 +406,22 @@ export interface AcceptResult {
 }
 
 /**
+ * Result of refunding an incoming payment
+ */
+export interface RefundResult {
+  /** Whether the operation succeeded */
+  success: boolean
+  /** Transaction ID for the refund */
+  txid: TXIDHexString
+  /** The refunded asset ID */
+  assetId: string
+  /** Amount refunded */
+  amount: number
+  /** Error message if failed */
+  error?: string
+}
+
+/**
  * Result of a token burn operation
  */
 export interface BurnResult {

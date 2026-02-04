@@ -29,7 +29,9 @@ import {
   OutputTagStringUnder300Bytes,
   PositiveIntegerOrZero,
   Random,
-  WalletInterface
+  WalletInterface,
+  CommsLayer,
+  AtomicBEEF
 } from '@bsv/sdk'
 
 import { BTMSToken } from './BTMSToken.js'
@@ -42,6 +44,7 @@ import type {
   IssueResult,
   SendResult,
   AcceptResult,
+  RefundResult,
   TokenForRecipient,
   IncomingToken,
   OwnershipProof,
@@ -55,7 +58,7 @@ import type {
   ChangeOutput,
   BurnResult,
   BTMSTransaction,
-  GetTransactionsResult
+  GetTransactionsResult,
 } from './types.js'
 import {
   BTMS_TOPIC,
@@ -677,7 +680,8 @@ export class BTMS {
             throw new Error('Failed to sign transaction')
           }
 
-          const finalTx = Transaction.fromAtomicBEEF(signResult.tx)
+          const txData = Array.isArray(signResult.tx) ? signResult.tx : Utils.toArray(signResult.tx)
+          const finalTx = Transaction.fromAtomicBEEF(txData)
           const txid = finalTx.id('hex') as TXIDHexString
 
           return {
@@ -855,6 +859,212 @@ export class BTMS {
     } catch (error) {
       return {
         success: false,
+        assetId: token.assetId,
+        amount: token.amount,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  }
+
+  /**
+   * Refund an incoming token back to the sender without internalizing it.
+   *
+   * Verifies the token, spends it, and sends a new token of equal value
+   * back to the original sender. The original incoming message is acknowledged
+   * so it disappears from the receiver's incoming list.
+   *
+   * @param token - The incoming token to refund
+   * @returns Refund result
+   */
+  async refundIncoming(token: IncomingToken): Promise<RefundResult> {
+    try {
+      if (!this.comms) {
+        throw new Error('Comms layer is required to refund incoming tokens')
+      }
+
+      // Decode and validate the token
+      const decoded = BTMSToken.decode(token.lockingScript)
+      if (!decoded.valid) {
+        throw new Error(`Invalid token: ${decoded.error}`)
+      }
+
+      // Verify the token exists on the overlay (fetch BEEF if possible)
+      const overlayLookup = await this.lookupTokenOnOverlay(
+        token.txid,
+        token.outputIndex,
+        true
+      )
+
+      // Re-broadcast if token is not on overlay
+      if (!overlayLookup.found && token.beef) {
+        const tx = Transaction.fromBEEF(token.beef)
+        const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {
+          networkPreset: this.networkPreset
+        })
+        const response = await broadcaster.broadcast(tx)
+        if (response.status !== 'success') {
+          throw new Error('Token not found on overlay and broadcast failed!')
+        }
+      }
+
+      const inputBeef = overlayLookup.beef
+        ?? (token.beef ? Beef.fromBinary(Utils.toArray(token.beef)) : undefined)
+
+      if (!inputBeef) {
+        throw new Error('Missing BEEF data required to refund token')
+      }
+
+      // Validate ability to unlock this token
+      const { keyID } = parseCustomInstructions(
+        token.customInstructions,
+        token.txid,
+        token.outputIndex
+      )
+
+      const { publicKey: derivedPubKey } = await this.wallet.getPublicKey({
+        protocolID: BTMS_PROTOCOL_ID,
+        keyID,
+        counterparty: token.sender,
+        forSelf: true
+      })
+
+      if (decoded.lockingPublicKey !== derivedPubKey) {
+        throw new Error(
+          `Key derivation mismatch: expected ${decoded.lockingPublicKey}, derived ${derivedPubKey}. ` +
+          `Cannot unlock this token with the provided customInstructions.`
+        )
+      }
+
+      const monthLabel = this.getMonthLabel()
+      const timestampLabel = this.getTimestampLabel()
+      const monthTag = this.getMonthTag()
+      const timestampTag = this.getTimestampTag()
+
+      // Create a new transfer back to the sender
+      const refundDerivationPrefix = Utils.toBase64(Random(32))
+      const refundDerivationSuffix = Utils.toBase64(Random(32))
+      const refundKeyID = `${refundDerivationPrefix} ${refundDerivationSuffix}`
+
+      const refundScript = await this.tokenTemplate.createTransfer(
+        token.assetId,
+        token.amount,
+        refundKeyID,
+        token.sender,
+        decoded.metadata,
+        false
+      )
+
+      const outputs: CreateActionOutput[] = [
+        {
+          satoshis: DEFAULT_TOKEN_SATOSHIS,
+          lockingScript: refundScript.toHex(),
+          customInstructions: JSON.stringify({
+            derivationPrefix: refundDerivationPrefix,
+            derivationSuffix: refundDerivationSuffix
+          }),
+          outputDescription: `Refund ${token.amount} tokens`,
+          tags: [
+            'btms_type_send',
+            'btms_direction_outgoing',
+            timestampTag,
+            monthTag,
+            `btms_assetid_${token.assetId}`,
+            `btms_counterparty_${token.sender}`
+          ] as OutputTagStringUnder300Bytes[]
+        }
+      ]
+
+      const inputs = [
+        {
+          outpoint: `${token.txid}.${token.outputIndex}` as OutpointString,
+          unlockingScriptLength: 74,
+          inputDescription: `Refund ${token.amount} tokens`
+        }
+      ]
+
+      const createArgs: CreateActionArgs = {
+        description: `Refund ${token.amount} tokens to ${token.sender.slice(0, 8)}...`,
+        labels: [
+          `${BTMS_LABEL_PREFIX}type send` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}direction outgoing` as LabelStringUnder300Bytes,
+          timestampLabel,
+          monthLabel,
+          `${BTMS_LABEL_PREFIX}assetId ${token.assetId}` as LabelStringUnder300Bytes,
+          `${BTMS_LABEL_PREFIX}counterparty ${token.sender}` as LabelStringUnder300Bytes
+        ],
+        inputBEEF: inputBeef.toBinary(),
+        inputs,
+        outputs,
+        options: {
+          acceptDelayedBroadcast: false,
+          randomizeOutputs: false
+        }
+      }
+
+      const { signableTransaction } = await this.wallet.createAction(createArgs)
+
+      if (!signableTransaction) {
+        throw new Error('Failed to create signable transaction')
+      }
+
+      const originalInstructions = JSON.parse(token.customInstructions)
+      const refundInstructions = JSON.stringify({
+        ...originalInstructions,
+        senderIdentityKey: token.sender
+      })
+
+      const selectedUtxo: BTMSTokenOutput = {
+        outpoint: `${token.txid}.${token.outputIndex}`,
+        txid: token.txid,
+        outputIndex: token.outputIndex,
+        satoshis: token.satoshis,
+        lockingScript: token.lockingScript,
+        customInstructions: refundInstructions,
+        token: decoded,
+        spendable: true,
+        beef: token.beef
+      }
+
+      const spends = await this.buildSpendsForInputs([selectedUtxo], signableTransaction.tx)
+      const { tx: signedTx, txid } = await this.signAndBroadcast(signableTransaction.reference, spends)
+
+      const tokenForRecipient: TokenForRecipient = {
+        txid,
+        outputIndex: 0,
+        lockingScript: refundScript.toHex() as HexString,
+        amount: token.amount,
+        satoshis: DEFAULT_TOKEN_SATOSHIS,
+        beef: signedTx,
+        customInstructions: JSON.stringify({
+          derivationPrefix: refundDerivationPrefix,
+          derivationSuffix: refundDerivationSuffix
+        }),
+        assetId: token.assetId,
+        metadata: decoded.metadata
+      }
+
+      await this.comms.sendMessage({
+        recipient: token.sender,
+        messageBox: BTMS_MESSAGE_BOX,
+        body: JSON.stringify(tokenForRecipient)
+      })
+
+      if (token.messageId) {
+        await this.comms.acknowledgeMessage({
+          messageIds: [token.messageId]
+        })
+      }
+
+      return {
+        success: true,
+        txid,
+        assetId: token.assetId,
+        amount: token.amount
+      }
+    } catch (error) {
+      return {
+        success: false,
+        txid: '' as TXIDHexString,
         assetId: token.assetId,
         amount: token.amount,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -1648,9 +1858,10 @@ export class BTMS {
 
   private async buildSpendsForInputs(
     selected: BTMSTokenOutput[],
-    unsignedTx: number[]
+    unsignedTx: number[] | Uint8Array
   ): Promise<Record<number, { unlockingScript: string }>> {
-    const txForSigning = Transaction.fromAtomicBEEF(unsignedTx)
+    const txData = Array.isArray(unsignedTx) ? unsignedTx : Utils.toArray(unsignedTx)
+    const txForSigning = Transaction.fromAtomicBEEF(txData)
     const spends: Record<number, { unlockingScript: string }> = {}
     for (let i = 0; i < selected.length; i++) {
       const utxo = selected[i]
@@ -1666,7 +1877,7 @@ export class BTMS {
   private async signAndBroadcast(
     reference: string,
     spends: Record<number, { unlockingScript: string }>
-  ): Promise<{ tx: number[]; txid: TXIDHexString }> {
+  ): Promise<{ tx: AtomicBEEF; txid: TXIDHexString }> {
     const signResult = await this.wallet.signAction({
       reference,
       spends
@@ -1676,7 +1887,8 @@ export class BTMS {
       throw new Error('Failed to sign transaction')
     }
 
-    const finalTx = Transaction.fromAtomicBEEF(signResult.tx)
+    const txData = Array.isArray(signResult.tx) ? signResult.tx : Utils.toArray(signResult.tx)
+    const finalTx = Transaction.fromAtomicBEEF(txData)
     const txid = finalTx.id('hex') as TXIDHexString
 
     const broadcaster = new TopicBroadcaster([BTMS_TOPIC], {

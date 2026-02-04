@@ -127,6 +127,21 @@ const Receive: React.FC<ReceiveProps> = ({
     }
   }
 
+  const handleRefund = async (payment: IncomingToken) => {
+    try {
+      setLoading(true)
+      await btms.refundIncoming(payment)
+      await loadIncoming(assetId)
+      await Promise.resolve(onReloadNeeded())
+      toast.success(`${payment.amount} ${asset?.name ?? ''} refunded successfully!`)
+      setOpen(false)
+    } catch (err: any) {
+      toast.error(formatBtmsError(err, 'Failed to refund payment'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // badge logic
   const currentCount = incoming.length
   const badgeVisible =
@@ -219,14 +234,24 @@ const Receive: React.FC<ReceiveProps> = ({
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
-                          <Button
-                            size="small"
-                            disabled={loading}
-                            onClick={() => handleAccept(pmt)}
-                            startIcon={loading ? <CircularProgress size={12} color="inherit" /> : null}
-                          >
-                            {loading ? 'Processing...' : 'Accept'}
-                          </Button>
+                          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                            <Button
+                              size="small"
+                              disabled={loading}
+                              onClick={() => handleAccept(pmt)}
+                              startIcon={loading ? <CircularProgress size={12} color="inherit" /> : null}
+                            >
+                              {loading ? 'Processing...' : 'Accept'}
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={loading}
+                              onClick={() => handleRefund(pmt)}
+                              color="inherit"
+                            >
+                              Refund
+                            </Button>
+                          </Box>
                         </TableCell>
                       </TableRow>
                     ))}
