@@ -16,7 +16,7 @@ Complete guide for integrating the BTMS Permission Module into your wallet appli
 
 The BTMS Permission Module provides wallet permission management for BTMS token operations. It consists of two main components:
 
-1. **BasicTokenModule** - Intercepts wallet calls for BTMS token operations and prompts users for authorization
+1. **Core Factory (`createBtmsModule`)** - Creates the permission module instance (framework-agnostic)
 2. **TokenAccessPrompt** - React UI component for displaying token spending authorization requests
 
 ## Architecture
@@ -43,7 +43,7 @@ Transaction Completes/Fails
 
 ### Component Responsibilities
 
-**BasicTokenModule:**
+**Core factory (`createBtmsModule`):**
 - Intercepts `createAction` calls to extract token spend information
 - Intercepts `createSignature` calls to verify authorized transactions
 - Manages session-based authorization for transaction flows
@@ -67,7 +67,7 @@ Ensure you have the following installed:
 
 ```json
 {
-  "@bsv/sdk": ">=1.1.0",
+  "@bsv/sdk": ">=2.0.0",
   "@bsv/wallet-toolbox-client": ">=1.5.0",
   "react": ">=18.0.0",
   "@mui/material": ">=5.0.0",
@@ -82,7 +82,7 @@ Ensure you have the following installed:
 First, create the prompt function with optional focus handlers for desktop applications.
 
 ```typescript
-import { useTokenSpendPrompt, type FocusHandlers } from '@bsv/btms-permission-module'
+import { useTokenSpendPrompt, type FocusHandlers } from '@bsv/btms-permission-module-ui'
 import { UserContext } from './UserContext' // Your app's context
 
 // In your wallet context provider component:
@@ -106,22 +106,17 @@ const requestTokenAccessWithTheme = useCallback((app: string, message: string) =
 const { promptUser: requestTokenAccess, PromptComponent } = useTokenSpendPrompt()
 ```
 
-### Step 2: Initialize BTMS + BasicTokenModule
+### Step 2: Create the Module Instance
 
 Create an instance of `BasicTokenModule` and pass your prompt function.
 
 ```typescript
-import { BTMS } from '@bsv/btms-core'
-import { BasicTokenModule } from '@bsv/btms-permission-module'
+import { createBtmsModule } from '@bsv/btms-permission-module'
 
-// Initialize BTMS for metadata lookups
-const btms = new BTMS({ wallet })
-
-// Initialize the module with your prompt function
-const basicTokenModule = new BasicTokenModule(
-  requestTokenAccessWithTheme,
-  btms
-)
+const basicTokenModule = createBtmsModule({
+  wallet,
+  promptHandler: requestTokenAccessWithTheme
+})
 ```
 
 ### Step 3: Register with WalletPermissionsManager

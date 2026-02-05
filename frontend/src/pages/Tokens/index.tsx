@@ -1,6 +1,6 @@
 // frontend/src/pages/Tokens/index.tsx
 
-import React, { useState, useEffect } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   Grid,
@@ -59,6 +59,30 @@ interface TokenTransaction {
   status?: string
 }
 
+type BalanceRange = '1D' | '1W' | '1M' | '1Y'
+
+const BALANCE_RANGE_LABELS: Record<BalanceRange, string> = {
+  '1D': '1 day',
+  '1W': '1 week',
+  '1M': '1 month',
+  '1Y': '1 year'
+}
+
+const getRangeMs = (range: BalanceRange) => {
+  switch (range) {
+    case '1D':
+      return 24 * 60 * 60 * 1000
+    case '1W':
+      return 7 * 24 * 60 * 60 * 1000
+    case '1M':
+      return 30 * 24 * 60 * 60 * 1000
+    case '1Y':
+      return 365 * 24 * 60 * 60 * 1000
+    default:
+      return 30 * 24 * 60 * 60 * 1000
+  }
+}
+
 const WOC_BASE_URL = 'https://whatsonchain.com/tx/'
 
 const formatDate = (tx: TokenTransaction) => {
@@ -91,6 +115,7 @@ const Tokens: React.FC = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [balanceHistory, setBalanceHistory] = useState<Array<{ date: string; balance: number; timestamp: number }>>([])
+  const [balanceRange, setBalanceRange] = useState<BalanceRange>('1M')
 
   // Calculate balance history from transactions
   const calculateBalanceHistory = (txs: TokenTransaction[], currentBalance: number) => {
@@ -218,6 +243,15 @@ const Tokens: React.FC = () => {
       setBalanceHistory(history)
     }
   }, [coreTransactions, sortOrder, token])
+
+  const filteredBalanceHistory = useMemo(() => {
+    if (balanceHistory.length === 0) return []
+    const rangeMs = getRangeMs(balanceRange)
+    const cutoff = Date.now() - rangeMs
+    const filtered = balanceHistory.filter(point => point.timestamp >= cutoff)
+    if (filtered.length > 0) return filtered
+    return balanceHistory.slice(-1)
+  }, [balanceHistory, balanceRange])
 
   if (error) {
     return (
@@ -356,13 +390,26 @@ const Tokens: React.FC = () => {
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   Balance history
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  30 days
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <ToggleButtonGroup
+                    size="small"
+                    value={balanceRange}
+                    exclusive
+                    onChange={(_, value) => value && setBalanceRange(value)}
+                  >
+                    <ToggleButton value="1D">1D</ToggleButton>
+                    <ToggleButton value="1W">1W</ToggleButton>
+                    <ToggleButton value="1M">1M</ToggleButton>
+                    <ToggleButton value="1Y">1Y</ToggleButton>
+                  </ToggleButtonGroup>
+                  <Typography variant="caption" color="text.secondary">
+                    {BALANCE_RANGE_LABELS[balanceRange]}
+                  </Typography>
+                </Box>
               </Box>
-              {balanceHistory.length > 0 ? (
+              {filteredBalanceHistory.length > 0 ? (
                 <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={balanceHistory}>
+                  <LineChart data={filteredBalanceHistory}>
                     <defs>
                       <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />

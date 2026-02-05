@@ -7,4 +7,22 @@
  * For React/MUI UI components, see @bsv/btms-permission-module-ui
  */
 
-export { BasicTokenModule } from './BasicTokenModule.js'
+import type { WalletInterface } from '@bsv/sdk'
+import { BTMS } from '@bsv/btms-core'
+import { BasicTokenModule } from './BasicTokenModule.js'
+
+export type PermissionPromptHandler = (app: string, message: string) => Promise<boolean>
+
+export type PermissionModuleFactoryArgs = {
+  wallet: WalletInterface
+  promptHandler?: PermissionPromptHandler
+}
+
+const denyPrompt: PermissionPromptHandler = async () => false
+
+export const createBtmsModule = ({ wallet, promptHandler }: PermissionModuleFactoryArgs) => {
+  const btms = new BTMS({ wallet, networkPreset: 'local' })
+  return new BasicTokenModule(promptHandler ?? denyPrompt, btms)
+}
+
+export { BasicTokenModule }
