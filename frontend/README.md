@@ -2,6 +2,17 @@
 
 Web application for managing BTMS tokens - issue, send, receive, and burn tokens on the Bitcoin SV blockchain.
 
+## Live App
+
+Production deployment: [https://btms.metanet.app](https://btms.metanet.app)
+
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Main developer package (`@bsv/btms`): [`../core/README.md`](../core/README.md)
+- Overlay backend (Topic Manager + Lookup Service): [`../backend/README.md`](../backend/README.md)
+- Wallet integration modules (BRC-100 via BRC-98/99 hooks): [`../permission-module/README.md`](../permission-module/README.md), [`../permission-module-ui/README.md`](../permission-module-ui/README.md)
+
 ## Overview
 
 The BTMS frontend provides a user-friendly interface for:

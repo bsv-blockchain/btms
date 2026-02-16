@@ -12,6 +12,18 @@ This is the **core permission module** for BTMS token operations - framework agn
 
 For ready-to-use React/MUI UI components, see **@bsv/btms-permission-module-ui**
 
+## Target Audience
+
+This module is for wallet developers integrating BTMS token support into **BRC-100 wallets** via **BRC-98/99 hooks**.
+
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Main BTMS API package (`@bsv/btms`): [`../core/README.md`](../core/README.md)
+- React/MUI prompt components: [`../permission-module-ui/README.md`](../permission-module-ui/README.md)
+- Full wallet integration guide: [`./INTEGRATION.md`](./INTEGRATION.md)
+- Frontend app and live deployment (`https://btms.metanet.app`): [`../frontend/README.md`](../frontend/README.md)
+
 ## Features
 
 - **Token Spend Authorization**: Prompts users before spending or burning BTMS tokens

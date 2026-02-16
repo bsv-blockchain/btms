@@ -6,6 +6,19 @@ Backend services for the Basic Token Management System (BTMS) overlay network.
 
 BTMS is a UTXO-based token protocol built on the BSV blockchain that enables the creation, transfer, and management of fungible and non-fungible tokens. This backend provides the overlay services needed to index and query BTMS tokens.
 
+## Role in BTMS
+
+The backend is the BTMS overlay network layer:
+- **Topic Manager** enforces protocol validity.
+- **Lookup Service** indexes token state for queries.
+
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Main developer package (`@bsv/btms`): [`../core/README.md`](../core/README.md)
+- Frontend app and live deployment (`https://btms.metanet.app`): [`../frontend/README.md`](../frontend/README.md)
+- CARS deployment config: [`../deployment-info.json`](../deployment-info.json)
+
 ## Features
 
 - **Topic Manager**: Validates token transactions and enforces protocol rules
@@ -105,8 +118,8 @@ npm run lint
 ## API Documentation
 
 For detailed API documentation, see:
-- [Topic Manager Docs](./src/docs/BTMSTopicManagerDocs.md)
-- [Lookup Service Docs](./src/lookup-services/docs/BTMSLookupDocs.md.js)
+- [Topic Manager Docs](./src/docs/BTMSTopicManagerDocs.ts)
+- [Lookup Service Docs](./src/docs/BTMSLookupDocs.ts)
 
 ## Architecture
 
@@ -122,7 +135,8 @@ src/
 │   ├── docs/                        # Service documentation
 │   └── __tests/                     # Lookup service tests
 └── docs/
-    └── BTMSTopicManagerDocs.md      # Protocol documentation
+    ├── BTMSTopicManagerDocs.ts      # Topic manager protocol docs
+    └── BTMSLookupDocs.ts            # Lookup service protocol docs
 ```
 
 ## Configuration

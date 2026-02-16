@@ -12,6 +12,17 @@ BTMS Core provides a clean, well-architected API for:
 
 The library is designed to work with the BSV overlay network and aligns exactly with the `BTMSTopicManager` protocol.
 
+## Start Here for BTMS Builders
+
+If you are building a token-enabled app, this is the primary package to use: `@bsv/btms`.
+
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Overlay backend (Topic Manager + Lookup Service): [`../backend/README.md`](../backend/README.md)
+- Frontend app and live deployment (`https://btms.metanet.app`): [`../frontend/README.md`](../frontend/README.md)
+- Wallet integration modules (BRC-100 via BRC-98/99 hooks): [`../permission-module/README.md`](../permission-module/README.md), [`../permission-module-ui/README.md`](../permission-module-ui/README.md)
+
 ## Installation
 
 ```bash

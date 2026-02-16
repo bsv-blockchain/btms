@@ -2,6 +2,14 @@
 
 Complete guide for integrating the BTMS Permission Module into your wallet application.
 
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Main BTMS API package (`@bsv/btms`): [`../core/README.md`](../core/README.md)
+- Core permission module overview: [`./README.md`](./README.md)
+- React/MUI prompt package: [`../permission-module-ui/README.md`](../permission-module-ui/README.md)
+- Frontend app and live deployment (`https://btms.metanet.app`): [`../frontend/README.md`](../frontend/README.md)
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -388,4 +396,4 @@ const basicTokenModule = new BasicTokenModule(customPromptFunction, btms)
 
 For issues or questions:
 - GitHub Issues: [btms repository](https://github.com/bitcoin-sv/btms)
-- Documentation: [BTMS API Docs](../core/API.md)
+- Documentation: [BTMS Core API Reference](../core/README.md#api-reference)

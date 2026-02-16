@@ -6,6 +6,18 @@ React/MUI UI components for BTMS token spending authorization.
 
 This package provides ready-to-use React components with Material-UI styling for the BTMS Permission Module. It works in conjunction with `@bsv/btms-permission-module` (core package).
 
+## Target Audience
+
+This UI package is for wallet developers integrating BTMS token support into **BRC-100 wallets** via **BRC-98/99 hooks**, using React/MUI for prompts.
+
+## Related Docs
+
+- Project index: [`../README.md`](../README.md)
+- Main BTMS API package (`@bsv/btms`): [`../core/README.md`](../core/README.md)
+- Core permission module: [`../permission-module/README.md`](../permission-module/README.md)
+- Full wallet integration guide: [`../permission-module/INTEGRATION.md`](../permission-module/INTEGRATION.md)
+- Frontend app and live deployment (`https://btms.metanet.app`): [`../frontend/README.md`](../frontend/README.md)
+
 ## Installation
 
 ```bash
