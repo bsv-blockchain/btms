@@ -1,6 +1,6 @@
 {
-  "name": "@bsv/btms-core",
-  "version": "0.1.0",
+  "name": "@bsv/btms",
+  "version": "1.0.0",
   "type": "module",
   "description": "Basic Token Management System - UTXO-based token management for BSV",
   "module": "dist/esm/src/index.js",
@@ -38,7 +38,7 @@
   "license": "SEE LICENSE IN LICENSE.txt",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bitcoin-sv/btms"
+    "url": "https://github.com/bsv-blockchain/btms"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -49,6 +49,6 @@
     "typescript": "^5.2.2"
   },
   "peerDependencies": {
-    "@bsv/sdk": "^2.0.0"
+    "@bsv/sdk": "^2.0.3"
   }
 }

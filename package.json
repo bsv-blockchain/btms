@@ -1,8 +1,8 @@
 {
-    "name": "btms",
+    "name": "@bsv/btms-project",
     "private": true,
     "version": "1.0.0",
-    "description": "Basic Token Management System",
+    "description": "Basic Token Management System project root",
     "scripts": {
         "lars": "lars",
         "cars": "cars",
