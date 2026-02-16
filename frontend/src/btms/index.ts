@@ -10,7 +10,7 @@ import {
   type BTMSAsset,
   type BTMSTransaction,
   type IncomingToken
-} from '@bsv/btms-core'
+} from '@bsv/btms'
 import { WalletClient, PubKeyHex, CommsLayer } from '@bsv/sdk'
 import { MessageBoxClient } from '@bsv/message-box-client'
 

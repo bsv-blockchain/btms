@@ -1,4 +1,4 @@
-# @bsv/btms-core
+# @bsv/btms
 
 **Basic Token Management System** - A modular library for managing UTXO-based tokens on the BSV blockchain.
 
@@ -15,13 +15,13 @@ The library is designed to work with the BSV overlay network and aligns exactly 
 ## Installation
 
 ```bash
-npm install @bsv/btms-core @bsv/sdk
+npm install @bsv/btms @bsv/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { BTMS } from '@bsv/btms-core'
+import { BTMS } from '@bsv/btms'
 import { MessageBoxClient } from '@bsv/message-box-client'
 
 // Create a BTMS instance with MessageBoxClient for token delivery
@@ -213,7 +213,7 @@ const utxos = await btms.getSpendableTokens('abc123...def.0')
 Low-level class for encoding and decoding tokens.
 
 ```typescript
-import { BTMSToken } from '@bsv/btms-core'
+import { BTMSToken } from '@bsv/btms'
 
 // Decode a token from a locking script
 const decoded = BTMSToken.decode(lockingScriptHex)
@@ -329,7 +329,7 @@ The type system includes `MarketplaceListing` and `MarketplaceOffer` types for f
 ## Architecture
 
 ```
-@bsv/btms-core/
+@bsv/btms/
 ├── src/
 │   ├── index.ts          # Public API exports
 │   ├── BTMS.ts           # Main BTMS class

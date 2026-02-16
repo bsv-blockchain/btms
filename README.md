@@ -20,7 +20,7 @@ BTMS is a complete token stack for Bitcoin SV that lets organizations issue, man
 
 ```
 BTMS
-├── core/                   # Token library + API (@bsv/btms-core)
+├── core/                   # Token library + API (@bsv/btms)
 ├── backend/                # Overlay topic manager + lookup service
 ├── frontend/               # Web UI for issuance + transfers
 ├── permission-module/      # Wallet permission module (framework agnostic)

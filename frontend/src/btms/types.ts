@@ -1,4 +1,4 @@
-import type { BTMSAsset } from '@bsv/btms-core'
+import type { BTMSAsset } from '@bsv/btms'
 
 export interface AssetView extends BTMSAsset {
   iconURL?: string

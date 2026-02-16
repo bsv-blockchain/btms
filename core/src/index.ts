@@ -1,5 +1,5 @@
 /**
- * @bsv/btms-core - Basic Token Management System
+ * @bsv/btms - Basic Token Management System
  * 
  * A modular library for managing UTXO-based tokens on the BSV blockchain.
  * 
@@ -17,7 +17,7 @@
  * 
  * @example
  * ```typescript
- * import { BTMS } from '@bsv/btms-core'
+ * import { BTMS } from '@bsv/btms'
  * 
  * // Create a BTMS instance
  * const btms = new BTMS({ networkPreset: 'mainnet' })

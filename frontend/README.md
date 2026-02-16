@@ -74,7 +74,7 @@ src/
 
 The frontend connects to:
 
-- **BTMS Core**: `@bsv/btms-core` for token operations
+- **BTMS Core**: `@bsv/btms` for token operations
 - **MessageBox**: For token delivery and incoming payments
 - **Overlay Services**: For asset metadata lookup
 - **UHRP**: For token icon storage
