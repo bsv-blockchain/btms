@@ -21,7 +21,7 @@ export type PermissionModuleFactoryArgs = {
 const denyPrompt: PermissionPromptHandler = async () => false
 
 export const createBtmsModule = ({ wallet, promptHandler }: PermissionModuleFactoryArgs) => {
-  const btms = new BTMS({ wallet, networkPreset: 'local' })
+  const btms = new BTMS({ wallet, networkPreset: 'mainnet' })
   return new BasicTokenModule(promptHandler ?? denyPrompt, btms)
 }
 
