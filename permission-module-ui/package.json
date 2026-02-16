@@ -27,18 +27,18 @@
   "author": "",
   "license": "Open BSV",
   "peerDependencies": {
-    "react": ">=18.0.0",
-    "@mui/material": ">=5.0.0",
+    "@bsv/uhrp-react": ">=1.0.5",
     "@mui/icons-material": ">=5.0.0",
-    "@bsv/uhrp-react": ">=1.0.5"
+    "@mui/material": ">=5.0.0",
+    "react": ">=18.0.0"
   },
   "devDependencies": {
+    "@bsv/uhrp-react": "^1.0.5",
+    "@mui/icons-material": "^6.0.0",
+    "@mui/material": "^6.0.0",
     "@types/react": "^18.0.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "@mui/material": "^6.0.0",
-    "@mui/icons-material": "^6.0.0",
-    "@bsv/uhrp-react": "^1.0.4",
     "typescript": "^5.2.2"
   }
 }

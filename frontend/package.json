@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "@bsv/btms": "file:../core",
+    "@bsv/btms": "^1.0.0",
     "@bsv/identity-react": "^1.1.13",
     "@bsv/message-box-client": "^2.0.0",
     "@bsv/sdk": "^2.0.3",
