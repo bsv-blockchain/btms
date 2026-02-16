@@ -68,5 +68,5 @@ const comms = createCommsAdapter(messageBoxClient, walletClient)
 export const btms = new BTMSCore({
   wallet: walletClient,
   comms,
-  networkPreset: 'local'
+  networkPreset: window.location.hostname === 'localhost' ? 'local' : 'mainnet'
 })
