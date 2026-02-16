@@ -17,6 +17,8 @@ import BabbageGo from '@babbage/go'
 
 export type { BTMSAsset, IncomingToken, BTMSTransaction }
 
+const DEFAULT_MESSAGEBOX_HOST = 'https://messagebox.babbage.systems'
+
 /**
  * Adapter to make MessageBoxClient compatible with CommsLayer interface.
  */
@@ -62,7 +64,10 @@ export const walletClient = new BabbageGo(undefined, {
     developerFeeSats: 400
   }
 })
-const messageBoxClient = new MessageBoxClient()
+const messageBoxClient = new MessageBoxClient({
+  host: DEFAULT_MESSAGEBOX_HOST,
+  walletClient
+})
 const comms = createCommsAdapter(messageBoxClient, walletClient)
 
 export const btms = new BTMSCore({
