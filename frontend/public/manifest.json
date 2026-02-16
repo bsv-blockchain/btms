@@ -14,11 +14,24 @@
   "background_color": "#ffffff",
   "babbage": {
     "groupPermissions": {
-      "protocolPermissions": [],
+      "protocolPermissions": [
+        {
+          "protocolID": [0, "p btms"],
+          "description": "Allow BTMS protocol operations"
+        },
+        {
+          "protocolID": [1, "messagebox"],
+          "description": "Allow MessageBox operations"
+        },
+        {
+          "protocolID": [2, "specific linkage revelation 0 p btms"],
+          "description": "Allow BTMS ownership proof decryption/reveal operations"
+        }
+      ],
       "basketAccess": [
         {
-          "basket": "tokens",
-          "description": "Contains the tokens you own."
+          "basket": "p btms",
+          "description": "Access BTMS token basket"
         }
       ]
     }
