@@ -43,29 +43,24 @@ jobs:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
       with:
-        node-version: '24'
-        registry-url: 'https://registry.npmjs.org'
+          node-version: '24'
+          scope: '@bsv'
+          registry-url: 'https://registry.npmjs.org'
     - run: npm ci
     - run: npm run build
-    - name: Check if version already published
-      id: check-version
-      run: |
-        PACKAGE_NAME=$(node -p "require('./package.json').name")
-        PACKAGE_VERSION=$(node -p "require('./package.json').version")
-
-        echo "Package: $PACKAGE_NAME@$PACKAGE_VERSION"
-
-        # Check if this version exists on npm
-        if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
-          echo "Version $PACKAGE_VERSION already published"
-          echo "should_publish=false" >> $GITHUB_OUTPUT
+- name: Publish packages
+  run: |
+    for pkg in core permission-module permission-module-ui; do
+      (
+        cd "$pkg" &&
+        npm ci &&
+        PKG_NAME=$(node -p "require('./package.json').name") &&
+        PKG_VERSION=$(node -p "require('./package.json').version") &&
+        if npm view "${PKG_NAME}@${PKG_VERSION}" >/dev/null 2>&1; then
+          echo "Skipping ${PKG_NAME}@${PKG_VERSION} - already published"
         else
-          echo "Version $PACKAGE_VERSION not yet published"
-          echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "Publishing ${PKG_NAME}@${PKG_VERSION}"
+          npm publish --access public
         fi
-    - name: Publish to npm
-      if: steps.check-version.outputs.should_publish == 'true'
-      run: npm publish
-    - name: Skip publishing
-      if: steps.check-version.outputs.should_publish == 'false'
-      run: echo "Skipping publish - version already exists on npm"
+      )
+    done
