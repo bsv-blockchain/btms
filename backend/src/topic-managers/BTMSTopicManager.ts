@@ -7,6 +7,14 @@ import docs from '../docs/BTMSTopicManagerDocs.js'
  * @public
  */
 export default class BTMSTopicManager implements TopicManager {
+  private parseTokenAmount(raw: string): number | undefined {
+    const amount = Number(raw)
+    if (!Number.isInteger(amount) || amount < 1) {
+      return undefined
+    }
+    return amount
+  }
+
   /**
    * Returns the outputs from the transaction that are admissible.
    * @param beef - The transaction data in BEEF format
@@ -82,7 +90,10 @@ export default class BTMSTopicManager implements TopicManager {
             assetId = field0
           }
 
-          const amount = Number(Utils.toUTF8(decoded.fields[1]))
+          const amount = this.parseTokenAmount(Utils.toUTF8(decoded.fields[1]))
+          if (amount === undefined) {
+            continue
+          }
           const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
 
           // Track the amounts for previous UTXOs
@@ -110,6 +121,10 @@ export default class BTMSTopicManager implements TopicManager {
         try {
           const decoded = PushDrop.decode(output.lockingScript)
           const assetId = Utils.toUTF8(decoded.fields[0])
+          const amount = this.parseTokenAmount(Utils.toUTF8(decoded.fields[1]))
+          if (amount === undefined) {
+            continue
+          }
 
           // Issuance outputs are always valid
           if (assetId === 'ISSUE') {
@@ -123,7 +138,6 @@ export default class BTMSTopicManager implements TopicManager {
           }
 
           // Add the amount for this asset
-          const amount = Number(Utils.toUTF8(decoded.fields[1]))
           assetTotals[assetId] += amount
 
           // Validate the amount and metadata

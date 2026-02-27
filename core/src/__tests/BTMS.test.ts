@@ -460,6 +460,59 @@ describe('BTMS', () => {
       expect(listOutputsCall.basket).toBe(BTMS_BASKET)
       expect(listOutputsCall.basket).toBe('p btms')
     })
+
+    it('should paginate wallet outputs when listing assets', async () => {
+      const assetA = `${'a'.repeat(64)}.0`
+      const assetB = `${'b'.repeat(64)}.0`
+      const outputs = [
+        ...Array.from({ length: 1000 }, (_, i) => ({
+          outpoint: `${(i + 1).toString(16).padStart(64, 'c').slice(0, 64)}.0`,
+          satoshis: 1,
+          lockingScript: 'asset-a',
+          spendable: true,
+          tags: ['btms_type_receive']
+        })),
+        {
+          outpoint: `${'d'.repeat(64)}.0`,
+          satoshis: 1,
+          lockingScript: 'asset-b',
+          spendable: true,
+          tags: ['btms_type_receive']
+        }
+      ]
+
+      const mockWallet = createMockWallet()
+      ; (mockWallet as any).listOutputs = jest.fn(async (args: ListOutputsArgs) => {
+        const offset = (args.offset ?? 0) as number
+        const limit = (args.limit ?? 1000) as number
+        return {
+          totalOutputs: outputs.length,
+          outputs: outputs.slice(offset, offset + limit)
+        }
+      })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn((lockingScript: any) => {
+        if (lockingScript === 'asset-a') {
+          return { valid: true, assetId: assetA, amount: 1, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        if (lockingScript === 'asset-b') {
+          return { valid: true, assetId: assetB, amount: 1, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        return { valid: false, error: 'invalid' } as any
+      }) as any
+
+      try {
+        const assets = await btms.listAssets()
+        const byId = new Map(assets.map(a => [a.assetId, a]))
+        expect(byId.get(assetA)?.balance).toBe(1000)
+        expect(byId.get(assetB)?.balance).toBe(1)
+        expect((mockWallet as any).listOutputs).toHaveBeenCalledTimes(2)
+      } finally {
+        BTMSToken.decode = originalDecode
+      }
+    })
   })
 
   describe('getSpendableTokens', () => {
@@ -484,6 +537,55 @@ describe('BTMS', () => {
       expect(listOutputsCall.include).toBe('locking scripts')
       expect(listOutputsCall.includeTags).toBe(true)
     })
+
+    it('should not include ISSUE outputs from other assets', async () => {
+      const assetTxA = '1'.repeat(64)
+      const assetTxB = '2'.repeat(64)
+      const assetIdA = `${assetTxA}.0`
+      const mockWallet = createMockWallet({
+        listOutputsResult: {
+          totalOutputs: 2,
+          outputs: [
+            {
+              outpoint: `${assetTxA}.0`,
+              satoshis: 1,
+              lockingScript: 'issue-a',
+              spendable: true,
+              customInstructions: JSON.stringify({ derivationPrefix: 'a', derivationSuffix: 'a' }),
+              tags: ['btms_type_issue']
+            },
+            {
+              outpoint: `${assetTxB}.0`,
+              satoshis: 1,
+              lockingScript: 'issue-b',
+              spendable: true,
+              customInstructions: JSON.stringify({ derivationPrefix: 'b', derivationSuffix: 'b' }),
+              tags: ['btms_type_issue']
+            }
+          ]
+        }
+      })
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn((lockingScript: any) => {
+        if (lockingScript === 'issue-a' || lockingScript?.toHex?.() === 'issue-a') {
+          return { valid: true, assetId: ISSUE_MARKER, amount: 10, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        if (lockingScript === 'issue-b' || lockingScript?.toHex?.() === 'issue-b') {
+          return { valid: true, assetId: ISSUE_MARKER, amount: 20, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        return { valid: false, error: 'invalid' } as any
+      }) as any
+
+      try {
+        const btms = new BTMS({ wallet: mockWallet })
+        const { tokens } = await btms.getSpendableTokens(assetIdA)
+        expect(tokens).toHaveLength(1)
+        expect(tokens[0].outpoint).toBe(`${assetTxA}.0`)
+      } finally {
+        BTMSToken.decode = originalDecode
+      }
+    })
   })
 
   describe('getBalance', () => {
@@ -500,6 +602,105 @@ describe('BTMS', () => {
       const balance = await btms.getBalance(assetId)
 
       expect(balance).toBe(0)
+    })
+
+    it('should aggregate balance across paged listOutputs results', async () => {
+      const assetId = MOCK_TXID + '.0'
+      const outputs = Array.from({ length: 1001 }, (_, i) => ({
+        outpoint: `${(i + 10).toString(16).padStart(64, 'a').slice(0, 64)}.0`,
+        satoshis: 1,
+        lockingScript: 'asset-script',
+        spendable: true,
+        customInstructions: JSON.stringify({ derivationPrefix: 'p', derivationSuffix: 's' }),
+        tags: ['btms_type_receive']
+      }))
+
+      const mockWallet = createMockWallet()
+      ; (mockWallet as any).listOutputs = jest.fn(async (args: ListOutputsArgs) => {
+        const offset = (args.offset ?? 0) as number
+        const limit = (args.limit ?? 1000) as number
+        return {
+          totalOutputs: outputs.length,
+          outputs: outputs.slice(offset, offset + limit)
+        }
+      })
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId,
+        amount: 1,
+        lockingPublicKey: MOCK_IDENTITY_KEY
+      }) as any
+
+      try {
+        const btms = new BTMS({ wallet: mockWallet })
+        const balance = await btms.getBalance(assetId)
+        expect(balance).toBe(1001)
+        expect((mockWallet as any).listOutputs).toHaveBeenCalledTimes(2)
+      } finally {
+        BTMSToken.decode = originalDecode
+      }
+    })
+  })
+
+  describe('getTransactions', () => {
+    it('should fallback to input-minus-change when send outputs are undecodable', async () => {
+      const assetId = `${MOCK_TXID}.0`
+      const mockWallet = createMockWallet({
+        listActionsResult: {
+          totalActions: 1,
+          actions: [{
+            txid: MOCK_TXID,
+            labels: [
+              `${BTMS_LABEL_PREFIX}type send`,
+              `${BTMS_LABEL_PREFIX}assetId ${assetId}`
+            ],
+            status: 'completed',
+            outputs: [
+              {
+                outputIndex: 0,
+                satoshis: 1,
+                lockingScript: 'bad-send-script',
+                tags: ['btms_type_send']
+              },
+              {
+                outputIndex: 1,
+                satoshis: 1,
+                lockingScript: 'change-script',
+                tags: ['btms_type_change']
+              }
+            ],
+            inputs: [
+              {
+                sourceOutpoint: `${'3'.repeat(64)}.0`,
+                sourceLockingScript: 'input-script'
+              }
+            ]
+          }] as any
+        }
+      })
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn((lockingScript: any) => {
+        if (lockingScript === 'input-script') {
+          return { valid: true, assetId, amount: 70, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        if (lockingScript === 'change-script') {
+          return { valid: true, assetId, amount: 20, lockingPublicKey: MOCK_IDENTITY_KEY } as any
+        }
+        return { valid: false, error: 'bad script' } as any
+      }) as any
+
+      try {
+        const btms = new BTMS({ wallet: mockWallet })
+        const result = await btms.getTransactions(assetId)
+        expect(result.transactions).toHaveLength(1)
+        expect(result.transactions[0].type).toBe('send')
+        expect(result.transactions[0].amount).toBe(-50)
+      } finally {
+        BTMSToken.decode = originalDecode
+      }
     })
   })
 
@@ -1538,6 +1739,65 @@ describe('BTMS', () => {
       }
     })
 
+    it('should retry broadcast and succeed on a later attempt', async () => {
+      const spendableTokens = [
+        {
+          txid: MOCK_TXID,
+          outputIndex: 0,
+          outpoint: `${MOCK_TXID}.0`,
+          satoshis: 1,
+          lockingScript: '00',
+          spendable: true,
+          customInstructions: JSON.stringify({ derivationPrefix: 'test', derivationSuffix: 'test' }),
+          token: { assetId: MOCK_ASSET_ID, amount: 50, metadata: undefined }
+        }
+      ]
+
+      const getSpendableSpy = jest
+        .spyOn(BTMS.prototype as any, 'getSpendableTokens')
+        .mockResolvedValue({ tokens: spendableTokens })
+
+      const selectAndVerifySpy = jest
+        .spyOn(BTMS.prototype as any, 'selectAndVerifyUTXOs')
+        .mockResolvedValue({
+          selected: spendableTokens,
+          totalInput: 50,
+          inputBeef: { toBinary: () => new Uint8Array([1, 2, 3]) }
+        })
+
+      const mockTx = { id: jest.fn().mockReturnValue(MOCK_TXID) }
+      const originalFromAtomicBEEF = Transaction.fromAtomicBEEF
+      Transaction.fromAtomicBEEF = jest.fn().mockReturnValue(mockTx)
+
+      const originalCreateUnlocker = BTMSToken.prototype.createUnlocker
+      BTMSToken.prototype.createUnlocker = jest.fn().mockReturnValue({
+        sign: async () => ({ toHex: () => '' })
+      })
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+      mockTopicBroadcasterBroadcast
+        .mockResolvedValueOnce({ status: 'error', description: 'temporary 1' })
+        .mockResolvedValueOnce({ status: 'error', description: 'temporary 2' })
+        .mockResolvedValueOnce({ status: 'success' })
+
+      const mockWallet = createMockWallet()
+      const btms = new BTMS({ wallet: mockWallet })
+
+      try {
+        const result = await btms.burn(MOCK_ASSET_ID, 50)
+        expect(result.success).toBe(true)
+        expect(mockTopicBroadcasterBroadcast).toHaveBeenCalledTimes(3)
+        expect(warnSpy).toHaveBeenCalled()
+      } finally {
+        warnSpy.mockRestore()
+        getSpendableSpy.mockRestore()
+        selectAndVerifySpy.mockRestore()
+        Transaction.fromAtomicBEEF = originalFromAtomicBEEF
+        BTMSToken.prototype.createUnlocker = originalCreateUnlocker
+        mockTopicBroadcasterBroadcast.mockReset()
+      }
+    })
+
     it('should split change outputs using change strategy options', async () => {
       const spendableTokens = [
         {
@@ -1875,6 +2135,72 @@ describe('Ownership Proof', () => {
         expect(result.error).toContain('prover')
       } finally {
         // Restore original
+        BTMSToken.decode = originalDecode
+      }
+    })
+
+    it('should reject proofs containing duplicate outpoints', async () => {
+      const mockWallet = createMockWallet({ identityKey: MOCK_IDENTITY_KEY })
+      ; (mockWallet as any).decrypt = jest.fn().mockResolvedValue({ plaintext: [1] })
+      const btms = new BTMS({ wallet: mockWallet })
+
+      const originalDecode = BTMSToken.decode
+      BTMSToken.decode = jest.fn().mockReturnValue({
+        valid: true,
+        assetId: GOLD_ASSET_ID,
+        amount: 10,
+        lockingPublicKey: MOCK_RECIPIENT_KEY
+      }) as any
+
+      const originalLookup = (btms as any).lookupTokenOnOverlay
+      ; (btms as any).lookupTokenOnOverlay = jest.fn().mockResolvedValue({ found: true })
+
+      const duplicateOutput = {
+        txid: MOCK_TXID,
+        outputIndex: 0,
+        lockingScript: 'mock-script',
+        satoshis: 1
+      }
+
+      try {
+        const proof = {
+          prover: MOCK_RECIPIENT_KEY,
+          verifier: MOCK_IDENTITY_KEY,
+          tokens: [
+            {
+              output: duplicateOutput,
+              keyID: 'k1',
+              linkage: {
+                prover: MOCK_RECIPIENT_KEY,
+                verifier: MOCK_IDENTITY_KEY,
+                counterparty: MOCK_RECIPIENT_KEY,
+                encryptedLinkage: [1],
+                encryptedLinkageProof: [2],
+                proofType: 1
+              }
+            },
+            {
+              output: duplicateOutput,
+              keyID: 'k1',
+              linkage: {
+                prover: MOCK_RECIPIENT_KEY,
+                verifier: MOCK_IDENTITY_KEY,
+                counterparty: MOCK_RECIPIENT_KEY,
+                encryptedLinkage: [1],
+                encryptedLinkageProof: [2],
+                proofType: 1
+              }
+            }
+          ],
+          amount: 20,
+          assetId: GOLD_ASSET_ID
+        }
+
+        const result = await btms.verifyOwnership(proof as any)
+        expect(result.valid).toBe(false)
+        expect(result.error).toContain('Duplicate token outpoint')
+      } finally {
+        ; (btms as any).lookupTokenOnOverlay = originalLookup
         BTMSToken.decode = originalDecode
       }
     })

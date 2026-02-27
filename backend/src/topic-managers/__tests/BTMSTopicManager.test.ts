@@ -91,6 +91,17 @@ describe('BTMS Topic Manager', () => {
 
       expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [] }, [])
     })
+
+    it('Rejects issuance output when amount is non-integer', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '1.5'])
+      const tx = new Transaction()
+      tx.addOutput({ lockingScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [])
+
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [])
+    })
   })
 
   describe('Redeeming issuance outputs', () => {
@@ -258,6 +269,26 @@ describe('BTMS Topic Manager', () => {
         unlockingScript: new Script()
       })
       const redeemScript = createPushDropScript(testPubKey, ['mock_assid.0', '101'])
+      tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
+
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
+    })
+
+    it('Rejects non-issuance output when amount is NaN', async () => {
+      const sourceTx = new Transaction()
+      const sourceScript = createPushDropScript(testPubKey, ['mock_assid.0', '100'])
+      sourceTx.addOutput({ lockingScript: sourceScript, satoshis: 1000 })
+
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      const redeemScript = createPushDropScript(testPubKey, ['mock_assid.0', 'abc'])
       tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
 
       const beef = createBeefWithSources(tx)

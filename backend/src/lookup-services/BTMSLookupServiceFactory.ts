@@ -38,6 +38,9 @@ class BTMSLookupService implements LookupService {
 
       const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
       const amount = Number(Utils.toUTF8(decoded.fields[btmsProtocol.amount]))
+      if (!Number.isInteger(amount) || amount < 1) {
+        throw new Error(`Invalid token amount: ${Utils.toUTF8(decoded.fields[btmsProtocol.amount])}`)
+      }
 
       // Determine the actual assetId
       let assetId: string

@@ -201,6 +201,18 @@ describe('BTMS Lookup Service', () => {
         lockingScript
       } as OutputAdmittedByTopic)).rejects.toThrow('Invalid payload mode')
     })
+
+    it('throws on invalid token amount', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', 'abc'])
+
+      await expect(service.outputAdmittedByTopic({
+        mode: 'locking-script',
+        txid: 'badamount',
+        outputIndex: 0,
+        topic: 'tm_btms',
+        lockingScript
+      } as OutputAdmittedByTopic)).rejects.toThrow('Invalid token amount')
+    })
   })
 
   describe('outputSpent', () => {
