@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Badge,
   Button,
@@ -16,10 +16,12 @@ import {
   TableBody,
   IconButton,
   CircularProgress,
-  Box
+  Box,
+  Chip
 } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import { Img } from '@bsv/uhrp-react'
 import { toast } from 'react-toastify'
 import { btms, IncomingToken } from '../../btms'
 import { AssetView } from '../../btms/types'
@@ -32,6 +34,30 @@ type ReceiveProps = {
   badge?: number | boolean
   incomingAmount?: SatoshiValue
   onReloadNeeded?: () => Promise<void> | void
+}
+
+const parseIncomingMetadata = (metadata: unknown): Record<string, unknown> | undefined => {
+  if (!metadata) return undefined
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  if (typeof metadata === 'object') {
+    return metadata as Record<string, unknown>
+  }
+
+  return undefined
+}
+
+const getMetadataString = (metadata: Record<string, unknown> | undefined, key: string): string | undefined => {
+  const value = metadata?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
 
 const Receive: React.FC<ReceiveProps> = ({
@@ -147,6 +173,28 @@ const Receive: React.FC<ReceiveProps> = ({
   const badgeVisible =
     typeof badge === 'number' ? badge > 0 : typeof incomingAmount === 'number' ? incomingAmount > 0 : !!badge
 
+  const resolvedAssetMetadata = useMemo(() => {
+    for (const payment of incoming) {
+      const parsed = parseIncomingMetadata(payment.metadata)
+      if (!parsed) continue
+
+      const name = getMetadataString(parsed, 'name')
+      const description = getMetadataString(parsed, 'description')
+      const iconURL = getMetadataString(parsed, 'iconURL')
+
+      if (name || description || iconURL) {
+        return { name, description, iconURL }
+      }
+    }
+
+    return undefined
+  }, [incoming])
+
+  const resolvedAssetName = asset?.name ?? resolvedAssetMetadata?.name ?? assetId ?? 'Asset'
+  const resolvedAssetDescription = asset?.description ?? resolvedAssetMetadata?.description
+  const resolvedAssetIconURL = asset?.iconURL ?? resolvedAssetMetadata?.iconURL
+  const ownsAssetAlready = Number(asset?.balance ?? 0) > 0
+
   const identityDisplay =
     identityKey === null ? '(loading...)' : identityKey === '' ? '(no identity from wallet)' : identityKey
 
@@ -159,7 +207,7 @@ const Receive: React.FC<ReceiveProps> = ({
       </Badge>
 
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" aria-labelledby="receive-dialog-title">
-        <DialogTitle id="receive-dialog-title">Incoming {asset?.name ?? 'Assets'}</DialogTitle>
+        <DialogTitle id="receive-dialog-title">Incoming {resolvedAssetName}</DialogTitle>
 
         <DialogContent dividers>
           <Grid container direction="column" spacing={2}>
@@ -189,11 +237,41 @@ const Receive: React.FC<ReceiveProps> = ({
 
             <Grid item sx={{ display: 'flex', justifyContent: 'space-between' }}>
               <Typography variant="subtitle1">
-                Pending transfers for <strong>{asset?.name ?? assetId ?? '(unknown asset)'}</strong>
+                Pending transfers for <strong>{resolvedAssetName}</strong>
               </Typography>
               <Button startIcon={<RefreshIcon />} disabled={loading} onClick={handleRefresh}>
                 Refresh
               </Button>
+            </Grid>
+
+            <Grid item>
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                  {resolvedAssetIconURL ? (
+                    <Img
+                      src={resolvedAssetIconURL}
+                      alt={resolvedAssetName}
+                      style={{ width: 36, height: 36, borderRadius: 4, objectFit: 'cover' }}
+                    />
+                  ) : null}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <Typography variant="subtitle2">{resolvedAssetName}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
+                      Asset ID: {assetId ?? incoming[0]?.assetId ?? '(unknown)'}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    color={ownsAssetAlready ? 'secondary' : 'warning'}
+                    label={ownsAssetAlready ? 'Owned + incoming' : 'Incoming only'}
+                  />
+                </Box>
+                {resolvedAssetDescription && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    {resolvedAssetDescription}
+                  </Typography>
+                )}
+              </Paper>
             </Grid>
 
             <Grid item>
@@ -226,7 +304,7 @@ const Receive: React.FC<ReceiveProps> = ({
                       <TableRow key={pmt.messageId}>
                         <TableCell>{pmt.sender || '(unknown)'}</TableCell>
                         <TableCell>
-                          {pmt.amount} {asset?.name ?? ''}
+                          {pmt.amount} {resolvedAssetName}
                         </TableCell>
                         <TableCell sx={{ maxWidth: 160 }}>
                           <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>

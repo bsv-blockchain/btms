@@ -35,6 +35,30 @@ interface HomeProps {
 
 const INCOMING_REFRESH_MS = 30000
 
+const parseIncomingMetadata = (metadata: unknown): Record<string, unknown> | undefined => {
+  if (!metadata) return undefined
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  if (typeof metadata === 'object') {
+    return metadata as Record<string, unknown>
+  }
+
+  return undefined
+}
+
+const getMetadataString = (metadata: Record<string, unknown> | undefined, key: string): string | undefined => {
+  const value = metadata?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
 const Home: React.FC<HomeProps> = ({ history }) => {
   const classes = useStyles()
 
@@ -60,6 +84,24 @@ const Home: React.FC<HomeProps> = ({ history }) => {
       amountMap[msg.assetId] = (amountMap[msg.assetId] || 0) + numericAmount
     }
     return amountMap
+  }, [incoming])
+
+  const incomingMetadataByAsset = useMemo(() => {
+    const metadataMap: Record<string, { metadata?: Record<string, unknown>, name?: string, description?: string, iconURL?: string }> = {}
+
+    for (const msg of incoming) {
+      if (metadataMap[msg.assetId]) continue
+
+      const parsedMetadata = parseIncomingMetadata(msg.metadata)
+      metadataMap[msg.assetId] = {
+        metadata: parsedMetadata,
+        name: getMetadataString(parsedMetadata, 'name'),
+        description: getMetadataString(parsedMetadata, 'description'),
+        iconURL: getMetadataString(parsedMetadata, 'iconURL')
+      }
+    }
+
+    return metadataMap
   }, [incoming])
 
   const lastIncomingFetchRef = useRef<number>(0)
@@ -110,12 +152,16 @@ const Home: React.FC<HomeProps> = ({ history }) => {
     for (const w of walletTokens) {
       const incomingCount = incomingByAsset[w.assetId] ?? 0
       const incomingAmount = incomingAmountsByAsset[w.assetId] ?? 0
+      const incomingMetadata = incomingMetadataByAsset[w.assetId]
 
       const hasPendingIncoming: boolean = incomingCount > 0
       const incoming: boolean = hasPendingIncoming
 
       byId[w.assetId] = {
         ...w,
+        name: w.name ?? incomingMetadata?.name ?? w.assetId,
+        iconURL: w.iconURL ?? incomingMetadata?.iconURL,
+        description: w.description ?? incomingMetadata?.description,
         hasPendingIncoming,
         incoming, // BOOLEAN (TS FIXED)
         incomingAmount // NUMBER (safe)
@@ -129,6 +175,7 @@ const Home: React.FC<HomeProps> = ({ history }) => {
       if (!byId[assetId]) {
         const incomingCount = incomingByAsset[assetId] ?? 0
         const incomingAmount = incomingAmountsByAsset[assetId] ?? 0
+        const incomingMetadata = incomingMetadataByAsset[assetId]
 
         if (incomingCount <= 0) continue
 
@@ -137,9 +184,11 @@ const Home: React.FC<HomeProps> = ({ history }) => {
 
         byId[assetId] = {
           assetId,
-          name: assetId,
+          name: incomingMetadata?.name ?? assetId,
           balance: 0,
-          metadata: {},
+          metadata: incomingMetadata?.metadata ?? {},
+          iconURL: incomingMetadata?.iconURL,
+          description: incomingMetadata?.description,
           hasPendingIncoming,
           incoming,
           incomingAmount
@@ -158,7 +207,7 @@ const Home: React.FC<HomeProps> = ({ history }) => {
     })
 
     return arr
-  }, [walletTokens, incomingByAsset, incomingAmountsByAsset])
+  }, [walletTokens, incomingByAsset, incomingAmountsByAsset, incomingMetadataByAsset])
 
   const totalBalance = useMemo(() => {
     return mergedTokens.reduce((sum, token) => sum + (Number(token.balance) || 0), 0)
@@ -212,6 +261,9 @@ const Home: React.FC<HomeProps> = ({ history }) => {
             <Typography variant="h4" sx={{ fontWeight: 700 }}>
               My Assets
             </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Includes both owned assets and assets waiting to be accepted.
+            </Typography>
           </Grid>
         </Grid>
 
@@ -250,6 +302,7 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                     const walletBalance = token.balance
 
                     const hasPendingIncoming = !!token.hasPendingIncoming || incomingCount > 0
+                    const incomingOnly = !hasWalletBalance && hasPendingIncoming
 
                     const displayBalance = walletBalance
                     const incomingBadge = hasPendingIncoming ? incomingCount : 0
@@ -292,12 +345,26 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                               )}
                             </Box>
                             <Box>
-                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                {token.name || token.assetId}
-                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                  {token.name || token.assetId}
+                                </Typography>
+                                {incomingOnly ? (
+                                  <Chip label="Incoming only" size="small" color="warning" />
+                                ) : hasPendingIncoming ? (
+                                  <Chip label="Owned + incoming" size="small" color="secondary" />
+                                ) : (
+                                  <Chip label="Owned" size="small" variant="outlined" />
+                                )}
+                              </Box>
                               <Typography variant="caption" color="text.secondary">
                                 {token.assetId}
                               </Typography>
+                              {token.description && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                  {token.description}
+                                </Typography>
+                              )}
                             </Box>
                           </Box>
                         </TableCell>
