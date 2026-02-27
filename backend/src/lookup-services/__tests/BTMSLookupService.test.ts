@@ -1,12 +1,14 @@
 import { BTMSLookupService } from '../BTMSLookupServiceFactory'
 import { BTMSStorageManager } from '../BTMSStorageManager'
-import { LockingScript, PrivateKey, PublicKey, Utils } from '@bsv/sdk'
+import { LockingScript, PrivateKey, PublicKey, Transaction, Utils } from '@bsv/sdk'
 import { OutputAdmittedByTopic, LookupQuestion } from '@bsv/overlay'
 
 /**
  * Helper to create a simple PushDrop-style locking script for testing.
  */
-function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScript {
+type TestPushDropField = string | number[]
+
+function createPushDropScript(pubKey: PublicKey, fields: TestPushDropField[]): LockingScript {
   const chunks: Array<{ op: number; data?: number[] }> = []
 
   // P2PK lock
@@ -16,7 +18,7 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
 
   // Push fields
   for (const field of fields) {
-    const data = Utils.toArray(field, 'utf8')
+    const data = typeof field === 'string' ? Utils.toArray(field, 'utf8') : field
     if (data.length <= 75) {
       chunks.push({ op: data.length, data })
     } else if (data.length <= 255) {
@@ -176,6 +178,44 @@ describe('BTMS Lookup Service', () => {
       expect(record.metadata).toBe('My Token Metadata')
     })
 
+    it('stores a signed issuance without treating signature as metadata', async () => {
+      const dummySignature = Array.from({ length: 65 }, (_, i) => (i * 11) % 256)
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '200', dummySignature])
+
+      await service.outputAdmittedByTopic({
+        mode: 'locking-script',
+        txid: 'sigissue',
+        outputIndex: 0,
+        topic: 'tm_btms',
+        lockingScript
+      } as OutputAdmittedByTopic)
+
+      const record = mockStorage.getRecord('sigissue', 0)
+      expect(record).toBeDefined()
+      expect(record.assetId).toBe('sigissue.0')
+      expect(record.amount).toBe(200)
+      expect(record.metadata).toBeUndefined()
+    })
+
+    it('stores a signed token with metadata', async () => {
+      const dummySignature = Array.from({ length: 64 }, (_, i) => (i * 19) % 256)
+      const lockingScript = createPushDropScript(testPubKey, ['existingAsset.5', '50', 'Meta', dummySignature])
+
+      await service.outputAdmittedByTopic({
+        mode: 'locking-script',
+        txid: 'sigmeta',
+        outputIndex: 2,
+        topic: 'tm_btms',
+        lockingScript
+      } as OutputAdmittedByTopic)
+
+      const record = mockStorage.getRecord('sigmeta', 2)
+      expect(record).toBeDefined()
+      expect(record.assetId).toBe('existingAsset.5')
+      expect(record.amount).toBe(50)
+      expect(record.metadata).toBe('Meta')
+    })
+
     it('ignores outputs from other topics', async () => {
       const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '100'])
 
@@ -200,6 +240,30 @@ describe('BTMS Lookup Service', () => {
         topic: 'tm_btms',
         lockingScript
       } as OutputAdmittedByTopic)).rejects.toThrow('Invalid payload mode')
+    })
+
+    it('throws on invalid token amount', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', 'abc'])
+
+      await expect(service.outputAdmittedByTopic({
+        mode: 'locking-script',
+        txid: 'badamount',
+        outputIndex: 0,
+        topic: 'tm_btms',
+        lockingScript
+      } as OutputAdmittedByTopic)).rejects.toThrow('Invalid token amount')
+    })
+
+    it('throws on too many fields', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '100', 'metadata', [1, 2, 3], 'extra'])
+
+      await expect(service.outputAdmittedByTopic({
+        mode: 'locking-script',
+        txid: 'badfields',
+        outputIndex: 0,
+        topic: 'tm_btms',
+        lockingScript
+      } as OutputAdmittedByTopic)).rejects.toThrow('BTMS token must have 2-4 fields')
     })
   })
 
@@ -305,6 +369,22 @@ describe('BTMS Lookup Service', () => {
         service: 'ls_btms',
         query: null
       } as unknown as LookupQuestion)).rejects.toThrow('A valid query must be provided')
+    })
+
+    it('history selector canonicalizes ISSUE output IDs', async () => {
+      const tx = new Transaction()
+      tx.addOutput({
+        lockingScript: createPushDropScript(testPubKey, ['ISSUE', '100']),
+        satoshis: 1000
+      })
+      const txid = tx.id('hex')
+      const beef = tx.toBEEF()
+
+      const includeMatching = await (service as any).historySelector(beef, 0, `${txid}.0`)
+      const includeNonMatching = await (service as any).historySelector(beef, 0, 'otherTxid.0')
+
+      expect(includeMatching).toBe(true)
+      expect(includeNonMatching).toBe(false)
     })
   })
 

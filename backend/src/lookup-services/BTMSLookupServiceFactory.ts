@@ -1,6 +1,6 @@
 import { BTMSStorageManager } from './BTMSStorageManager.js'
 import { AdmissionMode, LookupFormula, LookupQuestion, LookupService, OutputAdmittedByTopic, OutputSpent, SpendNotificationMode } from '@bsv/overlay'
-import { PushDrop, Transaction, Utils } from '@bsv/sdk'
+import { LockingScript, PushDrop, Transaction, Utils } from '@bsv/sdk'
 import { Db } from 'mongodb'
 import { btmsProtocol, BTMSLookupResult, BTMSQuery, BTMSRecord } from './types.js'
 import docs from '../docs/BTMSLookupDocs.js'
@@ -18,6 +18,72 @@ class BTMSLookupService implements LookupService {
 
   constructor(public storageManager: BTMSStorageManager) { }
 
+  private isLikelySignatureField(field: number[]): boolean {
+    if (field.length < 40) {
+      return false
+    }
+    const asText = Utils.toUTF8(field)
+    const roundTrip = Utils.toArray(asText, 'utf8')
+    if (roundTrip.length !== field.length) {
+      return true
+    }
+    let printable = 0
+    for (const code of asText) {
+      const codePoint = code.charCodeAt(0)
+      if (
+        (codePoint >= 32 && codePoint <= 126) ||
+        codePoint === 9 ||
+        codePoint === 10 ||
+        codePoint === 13
+      ) {
+        printable += 1
+      }
+    }
+    return printable / Math.max(asText.length, 1) < 0.8
+  }
+
+  private decodeAdmittedToken(lockingScript: LockingScript, txid: string, outputIndex: number): {
+    assetId: string
+    amount: number
+    metadata?: string
+    ownerKey: string
+  } {
+    const decoded = PushDrop.decode(lockingScript)
+
+    // BTMS tokens have 2-4 fields:
+    // [assetId, amount], [assetId, amount, metadata], [assetId, amount, signature], [assetId, amount, metadata, signature]
+    if (decoded.fields.length < 2 || decoded.fields.length > 4) {
+      throw new Error(`BTMS token must have 2-4 fields, got ${decoded.fields.length}`)
+    }
+
+    const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
+    const amountRaw = Utils.toUTF8(decoded.fields[btmsProtocol.amount])
+    const amount = Number(amountRaw)
+    if (!Number.isInteger(amount) || amount < 1) {
+      throw new Error(`Invalid token amount: ${amountRaw}`)
+    }
+
+    let metadata: string | undefined
+    if (decoded.fields.length === 3) {
+      if (!this.isLikelySignatureField(decoded.fields[btmsProtocol.metadata])) {
+        metadata = Utils.toUTF8(decoded.fields[btmsProtocol.metadata])
+      }
+    } else if (decoded.fields.length === 4) {
+      metadata = Utils.toUTF8(decoded.fields[btmsProtocol.metadata])
+    }
+
+    const assetId = assetIdField === 'ISSUE'
+      ? `${txid}.${outputIndex}`
+      : assetIdField
+
+    return {
+      assetId,
+      amount,
+      metadata,
+      ownerKey: decoded.lockingPublicKey.toString()
+    }
+  }
+
   async outputAdmittedByTopic(payload: OutputAdmittedByTopic): Promise<void> {
     if (payload.mode !== 'locking-script') {
       throw new Error('Invalid payload mode')
@@ -29,31 +95,7 @@ class BTMSLookupService implements LookupService {
     }
 
     try {
-      const decoded = PushDrop.decode(lockingScript)
-
-      // BTMS tokens have 2-3 fields: [assetId, amount, metadata?]
-      if (decoded.fields.length < 2 || decoded.fields.length > 3) {
-        throw new Error(`BTMS token must have 2-3 fields, got ${decoded.fields.length}`)
-      }
-
-      const assetIdField = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
-      const amount = Number(Utils.toUTF8(decoded.fields[btmsProtocol.amount]))
-
-      // Determine the actual assetId
-      let assetId: string
-      if (assetIdField === 'ISSUE') {
-        assetId = `${txid}.${outputIndex}`
-      } else {
-        assetId = assetIdField
-      }
-
-      // Extract metadata if present
-      const metadata = decoded.fields[btmsProtocol.metadata]
-        ? Utils.toUTF8(decoded.fields[btmsProtocol.metadata])
-        : undefined
-
-      // Get owner key from the PushDrop lock
-      const ownerKey = decoded.lockingPublicKey.toString()
+      const { assetId, amount, metadata, ownerKey } = this.decodeAdmittedToken(lockingScript, txid, outputIndex)
 
       await this.storageManager.storeRecord(
         txid,
@@ -137,18 +179,15 @@ class BTMSLookupService implements LookupService {
   private async historySelector(beef: number[], outputIndex: number, assetId?: string): Promise<boolean> {
     try {
       const tx = Transaction.fromBEEF(beef)
-      const decoded = PushDrop.decode(tx.outputs[outputIndex].lockingScript)
-
-      // Validate BTMS structure (2-3 fields)
-      if (decoded.fields.length < 2 || decoded.fields.length > 3) {
+      const output = tx.outputs[outputIndex]
+      if (!output) {
         return false
       }
-
-      // Extract the output's assetId
-      const outputAssetId = Utils.toUTF8(decoded.fields[btmsProtocol.assetId])
+      const decoded = this.decodeAdmittedToken(output.lockingScript, tx.id('hex'), outputIndex)
+      const outputAssetId = decoded.assetId
 
       // If we have context (assetId), only include outputs that match
-      if (assetId !== undefined && outputAssetId !== assetId && outputAssetId !== 'ISSUE') {
+      if (assetId !== undefined && outputAssetId !== assetId) {
         return false
       }
 

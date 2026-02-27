@@ -7,6 +7,68 @@ import docs from '../docs/BTMSTopicManagerDocs.js'
  * @public
  */
 export default class BTMSTopicManager implements TopicManager {
+  private isLikelySignatureField(field: number[]): boolean {
+    if (field.length < 40) {
+      return false
+    }
+    const asText = Utils.toUTF8(field)
+    const roundTrip = Utils.toArray(asText, 'utf8')
+    if (roundTrip.length !== field.length) {
+      return true
+    }
+    let printable = 0
+    for (const code of asText) {
+      const codePoint = code.charCodeAt(0)
+      if (
+        (codePoint >= 32 && codePoint <= 126) ||
+        codePoint === 9 ||
+        codePoint === 10 ||
+        codePoint === 13
+      ) {
+        printable += 1
+      }
+    }
+    return printable / Math.max(asText.length, 1) < 0.8
+  }
+
+  private decodeToken(lockingScript: LockingScript): { assetIdField: string, amount: number, metadata?: string } | undefined {
+    const decoded = PushDrop.decode(lockingScript)
+    if (decoded.fields.length < 2 || decoded.fields.length > 4) {
+      return undefined
+    }
+    const assetIdField = Utils.toUTF8(decoded.fields[0])
+    const amount = this.parseTokenAmount(Utils.toUTF8(decoded.fields[1]))
+    if (amount === undefined) {
+      return undefined
+    }
+
+    let metadata: string | undefined
+    if (decoded.fields.length === 3) {
+      if (!this.isLikelySignatureField(decoded.fields[2])) {
+        metadata = Utils.toUTF8(decoded.fields[2])
+      }
+    } else if (decoded.fields.length === 4) {
+      metadata = Utils.toUTF8(decoded.fields[2])
+    }
+
+    return { assetIdField, amount, metadata }
+  }
+
+  private canonicalAssetId(assetIdField: string, txid: string, outputIndex: number): string {
+    if (assetIdField === 'ISSUE') {
+      return `${txid}.${outputIndex}`
+    }
+    return assetIdField
+  }
+
+  private parseTokenAmount(raw: string): number | undefined {
+    const amount = Number(raw)
+    if (!Number.isInteger(amount) || amount < 1) {
+      return undefined
+    }
+    return amount
+  }
+
   /**
    * Returns the outputs from the transaction that are admissible.
    * @param beef - The transaction data in BEEF format
@@ -73,17 +135,13 @@ export default class BTMSTopicManager implements TopicManager {
 
       for (const p of previousUTXOs) {
         try {
-          const decoded = PushDrop.decode(p.lockingScript)
-          const field0 = Utils.toUTF8(decoded.fields[0])
-          let assetId: string
-          if (field0 === 'ISSUE') {
-            assetId = `${p.txid}.${p.outputIndex}`
-          } else {
-            assetId = field0
+          const decodedToken = this.decodeToken(p.lockingScript)
+          if (decodedToken === undefined) {
+            continue
           }
-
-          const amount = Number(Utils.toUTF8(decoded.fields[1]))
-          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const assetId = this.canonicalAssetId(decodedToken.assetIdField, p.txid, p.outputIndex)
+          const amount = decodedToken.amount
+          const metadata = decodedToken.metadata
 
           // Track the amounts for previous UTXOs
           if (!maxNumberOfEachAsset[assetId]) {
@@ -105,11 +163,16 @@ export default class BTMSTopicManager implements TopicManager {
       // 2. The total for that asset does not exceed what's allowed
       // We need an object to track totals for each asset
       const assetTotals: Record<string, number> = {}
+      const txid = parsedTransaction.id('hex')
 
       for (const [i, output] of parsedTransaction.outputs.entries()) {
         try {
-          const decoded = PushDrop.decode(output.lockingScript)
-          const assetId = Utils.toUTF8(decoded.fields[0])
+          const decodedToken = this.decodeToken(output.lockingScript)
+          if (decodedToken === undefined) {
+            continue
+          }
+          const assetId = decodedToken.assetIdField
+          const amount = decodedToken.amount
 
           // Issuance outputs are always valid
           if (assetId === 'ISSUE') {
@@ -123,11 +186,10 @@ export default class BTMSTopicManager implements TopicManager {
           }
 
           // Add the amount for this asset
-          const amount = Number(Utils.toUTF8(decoded.fields[1]))
           assetTotals[assetId] += amount
 
           // Validate the amount and metadata
-          const metadata = decoded.fields[2] ? Utils.toUTF8(decoded.fields[2]) : undefined
+          const metadata = decodedToken.metadata
           if (!maxNumberOfEachAsset[assetId]) {
             continue
           }
@@ -146,14 +208,11 @@ export default class BTMSTopicManager implements TopicManager {
       // Determine which previous coins to retain
       for (const p of previousUTXOs) {
         try {
-          const decodedPrevious = PushDrop.decode(p.lockingScript)
-          const field0 = Utils.toUTF8(decodedPrevious.fields[0])
-          let assetId: string
-          if (field0 === 'ISSUE') {
-            assetId = `${p.txid}.${p.outputIndex}`
-          } else {
-            assetId = field0
+          const decodedPrevious = this.decodeToken(p.lockingScript)
+          if (decodedPrevious === undefined) {
+            continue
           }
+          const assetId = this.canonicalAssetId(decodedPrevious.assetIdField, p.txid, p.outputIndex)
 
           // Assets included in the inputs but not the admitted outputs are not retained, otherwise they are.
           const assetInOutputs = parsedTransaction.outputs.some((x, i) => {
@@ -161,8 +220,12 @@ export default class BTMSTopicManager implements TopicManager {
               return false
             }
             try {
-              const decodedCurrent = PushDrop.decode(x.lockingScript)
-              return Utils.toUTF8(decodedCurrent.fields[0]) === assetId
+              const decodedCurrent = this.decodeToken(x.lockingScript)
+              if (decodedCurrent === undefined) {
+                return false
+              }
+              const outputAssetId = this.canonicalAssetId(decodedCurrent.assetIdField, txid, i)
+              return outputAssetId === assetId
             } catch {
               return false
             }

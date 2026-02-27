@@ -22,10 +22,11 @@ import type {
 /**
  * BTMS Token Protocol Field Schema
  * 
- * The BTMSTopicManager expects exactly 3 fields in PushDrop tokens:
+ * BTMS tokens use 2-4 PushDrop fields:
  * - Field 0: assetId (or "ISSUE" for new token issuance)
  * - Field 1: amount (as UTF-8 string of a positive integer)
  * - Field 2: metadata (optional JSON string)
+ * - Field 3: optional PushDrop signature (present when script-level signing is enabled)
  * 
  * For ISSUE tokens, the canonical assetId becomes `{txid}.{outputIndex}`
  * after the transaction is mined.

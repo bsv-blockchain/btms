@@ -8,6 +8,7 @@ BTMS tokens use PushDrop locking scripts with the following field structure:
 - Field 0: assetId ("ISSUE" for new tokens, or "txid.outputIndex" for existing assets)
 - Field 1: amount (numeric string representing token quantity)
 - Field 2: metadata (optional, UTF-8 string for token metadata)
+- Field 3: signature (optional PushDrop signature when script was created with signing enabled)
 
 The locking public key in the PushDrop script represents the token owner.
 
@@ -106,7 +107,7 @@ When history is enabled, each result includes a history function that filters th
 
 - \`"A valid query must be provided"\`: Query is null, undefined, or missing
 - \`"Lookup service not supported"\`: Service ID doesn't match \`ls_btms\`
-- \`"BTMS token must have 2-3 fields..."\`: Token doesn't have expected field count
+- \`"BTMS token must have 2-4 fields..."\`: Token doesn't have expected field count
 - \`"Invalid payload mode"\`: Admission mode doesn't match expected value
 
 ## Service Information

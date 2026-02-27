@@ -7,6 +7,7 @@ First the asset ID is pushed, in the format <txid>.<vout> (hex dot dec) or 'ISSU
 Then the amount is pushed.
 
 Optionally, metadata is pushed. If pushed in the issuance, it must be maintained in all future outputs.
+Some PushDrop outputs may also include a trailing signature field; this is not treated as token metadata.
 
 Then the fields are dropped and the P2PK locking script follows.
 

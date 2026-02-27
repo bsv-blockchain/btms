@@ -5,7 +5,9 @@ import { LockingScript, PrivateKey, PublicKey, Script, Transaction, Utils } from
  * Helper to create a simple PushDrop-style locking script for testing.
  * Format: <pubkey> OP_CHECKSIG <field1> <field2> ... OP_DROP/OP_2DROP
  */
-function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScript {
+type TestPushDropField = string | number[]
+
+function createPushDropScript(pubKey: PublicKey, fields: TestPushDropField[]): LockingScript {
   const chunks: Array<{ op: number; data?: number[] }> = []
 
   // P2PK lock
@@ -15,7 +17,7 @@ function createPushDropScript(pubKey: PublicKey, fields: string[]): LockingScrip
 
   // Push fields
   for (const field of fields) {
-    const data = Utils.toArray(field, 'utf8')
+    const data = typeof field === 'string' ? Utils.toArray(field, 'utf8') : field
     if (data.length <= 75) {
       chunks.push({ op: data.length, data })
     } else if (data.length <= 255) {
@@ -91,6 +93,28 @@ describe('BTMS Topic Manager', () => {
 
       expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [] }, [])
     })
+
+    it('Rejects issuance output when amount is non-integer', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '1.5'])
+      const tx = new Transaction()
+      tx.addOutput({ lockingScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [])
+
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [])
+    })
+
+    it('Rejects output with too many fields', async () => {
+      const lockingScript = createPushDropScript(testPubKey, ['ISSUE', '100', 'metadata', [1, 2, 3], 'extra'])
+      const tx = new Transaction()
+      tx.addOutput({ lockingScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [])
+
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [])
+    })
   })
 
   describe('Redeeming issuance outputs', () => {
@@ -103,6 +127,29 @@ describe('BTMS Topic Manager', () => {
       const sourceTxid = sourceTx.id('hex')
 
       // Create spending transaction
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      const redeemScript = createPushDropScript(testPubKey, [`${sourceTxid}.0`, '100'])
+      tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
+
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
+    })
+
+    it('Redeems a signed issuance output without treating signature as metadata', async () => {
+      const sourceTx = new Transaction()
+      const dummySignature = Array.from({ length: 65 }, (_, i) => (i * 37) % 256)
+      const issuanceScript = createPushDropScript(testPubKey, ['ISSUE', '100', dummySignature])
+      sourceTx.addOutput({ lockingScript: issuanceScript, satoshis: 1000 })
+
+      const sourceTxid = sourceTx.id('hex')
+
       const tx = new Transaction()
       tx.addInput({
         sourceTransaction: sourceTx,
@@ -132,6 +179,30 @@ describe('BTMS Topic Manager', () => {
         unlockingScript: new Script()
       })
       const redeemScript = createPushDropScript(testPubKey, [`${sourceTxid}.0`, '100', 'metadata_1'])
+      tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
+
+      expectAdmitted(admitted, { outputsToAdmit: [0], coinsToRetain: [0] }, [0])
+    })
+
+    it('Redeems a signed issuance output with metadata', async () => {
+      const sourceTx = new Transaction()
+      const sourceSignature = Array.from({ length: 64 }, (_, i) => (i * 13) % 256)
+      const issuanceScript = createPushDropScript(testPubKey, ['ISSUE', '100', 'metadata_1', sourceSignature])
+      sourceTx.addOutput({ lockingScript: issuanceScript, satoshis: 1000 })
+
+      const sourceTxid = sourceTx.id('hex')
+
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      const destSignature = Array.from({ length: 64 }, (_, i) => (i * 17) % 256)
+      const redeemScript = createPushDropScript(testPubKey, [`${sourceTxid}.0`, '100', 'metadata_1', destSignature])
       tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
 
       const beef = createBeefWithSources(tx)
@@ -258,6 +329,26 @@ describe('BTMS Topic Manager', () => {
         unlockingScript: new Script()
       })
       const redeemScript = createPushDropScript(testPubKey, ['mock_assid.0', '101'])
+      tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
+
+      const beef = createBeefWithSources(tx)
+      const admitted = await manager.identifyAdmissibleOutputs(beef, [0])
+
+      expectAdmitted(admitted, { outputsToAdmit: [], coinsToRetain: [] }, [0])
+    })
+
+    it('Rejects non-issuance output when amount is NaN', async () => {
+      const sourceTx = new Transaction()
+      const sourceScript = createPushDropScript(testPubKey, ['mock_assid.0', '100'])
+      sourceTx.addOutput({ lockingScript: sourceScript, satoshis: 1000 })
+
+      const tx = new Transaction()
+      tx.addInput({
+        sourceTransaction: sourceTx,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script()
+      })
+      const redeemScript = createPushDropScript(testPubKey, ['mock_assid.0', 'abc'])
       tx.addOutput({ lockingScript: redeemScript, satoshis: 1000 })
 
       const beef = createBeefWithSources(tx)
