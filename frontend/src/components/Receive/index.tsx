@@ -6,21 +6,15 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Grid,
   Paper,
   Typography,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  IconButton,
   CircularProgress,
   Box,
-  Chip
+  Tooltip,
+  IconButton
 } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import RefreshIcon from '@mui/icons-material/Refresh'
+import { IdentityCard } from '@bsv/identity-react'
 import { Img } from '@bsv/uhrp-react'
 import { toast } from 'react-toastify'
 import { btms, IncomingToken } from '../../btms'
@@ -60,6 +54,11 @@ const getMetadataString = (metadata: Record<string, unknown> | undefined, key: s
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
 
+const truncateAssetId = (assetId: string, prefix = 8, suffix = 8): string => {
+  if (!assetId || assetId.length <= prefix + suffix + 3) return assetId
+  return `${assetId.slice(0, prefix)}...${assetId.slice(-suffix)}`
+}
+
 const Receive: React.FC<ReceiveProps> = ({
   assetId,
   asset,
@@ -69,34 +68,12 @@ const Receive: React.FC<ReceiveProps> = ({
 }) => {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [identityKey, setIdentityKey] = useState<string | null>(null)
+  const [processingSender, setProcessingSender] = useState<string | null>(null)
+  const [processingAction, setProcessingAction] = useState<'receive' | 'reject' | null>(null)
   const [incoming, setIncoming] = useState<IncomingToken[]>([])
 
-  // -------------------------
-  // 1) Load identity key
-  // -------------------------
   useEffect(() => {
-    let cancelled = false
-
-    const loadIdentityKey = async () => {
-      try {
-        if (typeof window === 'undefined') {
-          if (!cancelled) setIdentityKey('')
-          return
-        }
-
-        const key = await btms.getIdentityKey()
-
-        if (!cancelled) setIdentityKey(key)
-      } catch {
-        if (!cancelled) setIdentityKey('')
-      }
-    }
-
-    loadIdentityKey()
-    return () => {
-      cancelled = true
-    }
+    // kept so eslint/react-hooks remains consistent with component lifecycle expectations
   }, [])
 
   // -------------------------
@@ -122,49 +99,78 @@ const Receive: React.FC<ReceiveProps> = ({
 
   const handleClose = () => setOpen(false)
 
-  const handleCopy = () => {
-    if (!identityKey) return
-    if (!navigator?.clipboard?.writeText) {
-      toast.error('Clipboard not available')
-      return
-    }
-    navigator.clipboard.writeText(identityKey)
-      .then(() => toast.success('Identity key copied'))
-      .catch(() => toast.error('Failed to copy identity key'))
+  const getSenderGroupKey = (payment: IncomingToken): string => {
+    return typeof payment.sender === 'string' && payment.sender.length > 0
+      ? payment.sender
+      : '(unknown)'
   }
 
-  const handleRefresh = async () => {
-    await loadIncoming(assetId)
-    await Promise.resolve(onReloadNeeded())
-  }
+  const handleReceiveAll = async () => {
+    if (incoming.length === 0) return
 
-  const handleAccept = async (payment: IncomingToken) => {
     try {
       setLoading(true)
-      await btms.accept(payment)
+      for (const payment of incoming) {
+        await btms.accept(payment)
+      }
       await loadIncoming(assetId)
       await Promise.resolve(onReloadNeeded())
-      toast.success(`${payment.amount} ${asset?.name ?? ''} accepted successfully!`)
+      toast.success(`Received ${incoming.length} transfer${incoming.length === 1 ? '' : 's'} of ${resolvedAssetName}`)
       setOpen(false)
     } catch (err: any) {
-      toast.error(formatBtmsError(err, 'Failed to accept payment'))
+      toast.error(formatBtmsError(err, 'Failed to receive incoming asset'))
     } finally {
       setLoading(false)
     }
   }
 
-  const handleRefund = async (payment: IncomingToken) => {
+  const handleReceiveBySender = async (sender: string) => {
+    const senderPayments = incoming.filter(payment => getSenderGroupKey(payment) === sender)
+    if (senderPayments.length === 0) return
+
     try {
       setLoading(true)
-      await btms.refundIncoming(payment)
+      setProcessingSender(sender)
+      setProcessingAction('receive')
+
+      for (const payment of senderPayments) {
+        await btms.accept(payment)
+      }
+
       await loadIncoming(assetId)
       await Promise.resolve(onReloadNeeded())
-      toast.success(`${payment.amount} ${asset?.name ?? ''} refunded successfully!`)
-      setOpen(false)
+      toast.success(`Received ${senderPayments.length} transfer${senderPayments.length === 1 ? '' : 's'} from sender`)
     } catch (err: any) {
-      toast.error(formatBtmsError(err, 'Failed to refund payment'))
+      toast.error(formatBtmsError(err, 'Failed to receive sender transfers'))
     } finally {
       setLoading(false)
+      setProcessingSender(null)
+      setProcessingAction(null)
+    }
+  }
+
+  const handleRejectBySender = async (sender: string) => {
+    const senderPayments = incoming.filter(payment => getSenderGroupKey(payment) === sender)
+    if (senderPayments.length === 0 || sender === '(unknown)') return
+
+    try {
+      setLoading(true)
+      setProcessingSender(sender)
+      setProcessingAction('reject')
+
+      for (const payment of senderPayments) {
+        await btms.refundIncoming(payment)
+      }
+
+      await loadIncoming(assetId)
+      await Promise.resolve(onReloadNeeded())
+      toast.success(`Rejected ${senderPayments.length} transfer${senderPayments.length === 1 ? '' : 's'} from sender`)
+    } catch (err: any) {
+      toast.error(formatBtmsError(err, 'Failed to reject sender transfers'))
+    } finally {
+      setLoading(false)
+      setProcessingSender(null)
+      setProcessingAction(null)
     }
   }
 
@@ -193,10 +199,38 @@ const Receive: React.FC<ReceiveProps> = ({
   const resolvedAssetName = asset?.name ?? resolvedAssetMetadata?.name ?? assetId ?? 'Asset'
   const resolvedAssetDescription = asset?.description ?? resolvedAssetMetadata?.description
   const resolvedAssetIconURL = asset?.iconURL ?? resolvedAssetMetadata?.iconURL
-  const ownsAssetAlready = Number(asset?.balance ?? 0) > 0
+  const resolvedAssetId = assetId ?? incoming[0]?.assetId ?? '(unknown)'
+  const totalIncomingAmount = incoming.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
 
-  const identityDisplay =
-    identityKey === null ? '(loading...)' : identityKey === '' ? '(no identity from wallet)' : identityKey
+  const incomingBySender = useMemo(() => {
+    const senderMap: Record<string, { sender: string, amount: number, count: number, payments: IncomingToken[] }> = {}
+
+    for (const payment of incoming) {
+      const sender = getSenderGroupKey(payment)
+
+      if (!senderMap[sender]) {
+        senderMap[sender] = { sender, amount: 0, count: 0, payments: [] }
+      }
+
+      senderMap[sender].amount += Number(payment.amount) || 0
+      senderMap[sender].count += 1
+      senderMap[sender].payments.push(payment)
+    }
+
+    return Object.values(senderMap).sort((a, b) => b.amount - a.amount)
+  }, [incoming])
+
+  const hasMultipleSenders = incomingBySender.length > 1
+
+  const copyAssetId = async () => {
+    if (resolvedAssetId === '(unknown)') return
+    try {
+      await navigator.clipboard.writeText(resolvedAssetId)
+      toast.success('Asset ID copied')
+    } catch {
+      toast.error('Failed to copy Asset ID')
+    }
+  }
 
   return (
     <>
@@ -206,142 +240,115 @@ const Receive: React.FC<ReceiveProps> = ({
         </Button>
       </Badge>
 
-      <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" aria-labelledby="receive-dialog-title">
-        <DialogTitle id="receive-dialog-title">Incoming {resolvedAssetName}</DialogTitle>
+      <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm" aria-labelledby="receive-dialog-title">
+        <DialogTitle id="receive-dialog-title">Receive {resolvedAssetName}</DialogTitle>
 
         <DialogContent dividers>
-          <Grid container direction="column" spacing={2}>
-            <Grid item>
-              <Typography variant="subtitle1">Your Identity Key</Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                Share this with anyone who needs to transfer assets to you.
-              </Typography>
-
-              <Paper
-                variant="outlined"
-                sx={{
-                  p: 1,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
-              >
-                <Typography variant="body2" sx={{ wordBreak: 'break-all', mr: 1 }}>
-                  {identityDisplay}
+          <Paper variant="outlined" sx={{ p: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+              {resolvedAssetIconURL ? (
+                <Img
+                  src={resolvedAssetIconURL}
+                  alt={resolvedAssetName}
+                  style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }}
+                />
+              ) : null}
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  {resolvedAssetName}
                 </Typography>
-                <IconButton size="small" onClick={handleCopy}>
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Paper>
-            </Grid>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                  Asset ID:
+                  <Tooltip title={resolvedAssetId}>
+                    <span style={{ fontFamily: 'monospace' }}>{truncateAssetId(resolvedAssetId)}</span>
+                  </Tooltip>
+                  <Tooltip title="Copy Asset ID">
+                    <IconButton size="small" sx={{ p: 0.25 }} onClick={() => void copyAssetId()}>
+                      <ContentCopyIcon sx={{ fontSize: 12 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Typography>
+              </Box>
+            </Box>
 
-            <Grid item sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography variant="subtitle1">
-                Pending transfers for <strong>{resolvedAssetName}</strong>
+            {resolvedAssetDescription && (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                {resolvedAssetDescription}
               </Typography>
-              <Button startIcon={<RefreshIcon />} disabled={loading} onClick={handleRefresh}>
-                Refresh
-              </Button>
-            </Grid>
+            )}
 
-            <Grid item>
-              <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                  {resolvedAssetIconURL ? (
-                    <Img
-                      src={resolvedAssetIconURL}
-                      alt={resolvedAssetName}
-                      style={{ width: 36, height: 36, borderRadius: 4, objectFit: 'cover' }}
-                    />
-                  ) : null}
-                  <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <Typography variant="subtitle2">{resolvedAssetName}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                      Asset ID: {assetId ?? incoming[0]?.assetId ?? '(unknown)'}
+            {loading && incoming.length === 0 ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 3, gap: 1.5 }}>
+                <CircularProgress color="secondary" size={24} />
+                <Typography variant="body2" color="text.secondary">Loading incoming asset...</Typography>
+              </Box>
+            ) : (
+              <>
+                <Typography variant="body1">
+                  {currentCount === 0
+                    ? 'No incoming asset available to receive.'
+                    : `${totalIncomingAmount} units incoming across ${currentCount} transfer${currentCount === 1 ? '' : 's'}`}
+                </Typography>
+
+                {currentCount > 0 && (
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Sent from
                     </Typography>
-                  </Box>
-                  <Chip
-                    size="small"
-                    color={ownsAssetAlready ? 'secondary' : 'warning'}
-                    label={ownsAssetAlready ? 'Owned + incoming' : 'Incoming only'}
-                  />
-                </Box>
-                {resolvedAssetDescription && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {resolvedAssetDescription}
-                  </Typography>
-                )}
-              </Paper>
-            </Grid>
 
-            <Grid item>
-              <Typography variant="caption" color="text.secondary">
-                {currentCount} message{currentCount === 1 ? '' : 's'} &nbsp;·&nbsp; total:&nbsp;
-                {incoming.reduce((sum, p) => sum + (p.amount || 0), 0)}
-              </Typography>
-            </Grid>
+                    <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                      {incomingBySender.map(entry => (
+                        <Box key={entry.sender} sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1.5 }}>
+                          <Box sx={{ minWidth: 0 }}>
+                            {entry.sender === '(unknown)' ? (
+                              <Typography variant="body2">Unknown sender</Typography>
+                            ) : (
+                              <IdentityCard identityKey={entry.sender} />
+                            )}
+                          </Box>
 
-            <Grid item>
-              {loading && incoming.length === 0 ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4, gap: 2 }}>
-                  <CircularProgress color="secondary" />
-                  <Typography>Loading pending transfers...</Typography>
-                </Box>
-              ) : incoming.length === 0 ? (
-                <Typography>No pending transfers for this asset.</Typography>
-              ) : (
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>From</TableCell>
-                      <TableCell>Amount</TableCell>
-                      <TableCell>TXID</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {incoming.map(pmt => (
-                      <TableRow key={pmt.messageId}>
-                        <TableCell>{pmt.sender || '(unknown)'}</TableCell>
-                        <TableCell>
-                          {pmt.amount} {resolvedAssetName}
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 160 }}>
-                          <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-                            {pmt.txid || '(no txid)'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                          <Box sx={{ display: 'flex', gap: 0.75, flexShrink: 0 }}>
                             <Button
                               size="small"
-                              disabled={loading}
-                              onClick={() => handleAccept(pmt)}
-                              startIcon={loading ? <CircularProgress size={12} color="inherit" /> : null}
+                              variant="outlined"
+                              color="inherit"
+                              disabled={loading || entry.sender === '(unknown)'}
+                              onClick={() => void handleRejectBySender(entry.sender)}
                             >
-                              {loading ? 'Processing...' : 'Accept'}
+                              {processingSender === entry.sender && processingAction === 'reject' ? 'Rejecting...' : 'Reject'}
                             </Button>
                             <Button
                               size="small"
+                              variant="contained"
+                              color="secondary"
                               disabled={loading}
-                              onClick={() => handleRefund(pmt)}
-                              color="inherit"
+                              onClick={() => void handleReceiveBySender(entry.sender)}
                             >
-                              Refund
+                              {processingSender === entry.sender && processingAction === 'receive' ? 'Receiving...' : 'Receive'}
                             </Button>
                           </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </Grid>
-          </Grid>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+              </>
+            )}
+          </Paper>
         </DialogContent>
 
         <DialogActions>
           <Button onClick={handleClose}>Close</Button>
+          {hasMultipleSenders && (
+            <Button
+              variant="contained"
+              color="secondary"
+              disabled={loading || currentCount === 0}
+              onClick={handleReceiveAll}
+            >
+              {loading ? 'Receiving all...' : 'Receive all'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </>

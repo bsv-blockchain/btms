@@ -96,19 +96,19 @@ const Send: React.FC<SendProps> = ({ assetId, asset, onReloadNeeded = () => { } 
         Send
       </Button>
 
-      <Dialog open={open} onClose={loading ? undefined : handleSendCancel} color="primary" maxWidth="md" fullWidth>
+      <Dialog open={open} onClose={loading ? undefined : handleSendCancel} color="primary" maxWidth="sm" fullWidth>
         <DialogTitle variant="h4" sx={{ fontWeight: 'bold' }}>
           Send {asset.name}
         </DialogTitle>
 
-        <DialogContent sx={{ minHeight: 400 }}>
+        <DialogContent sx={{ minHeight: loading ? 180 : 320 }}>
           {loading && (
             <Box sx={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              py: 4,
+              py: 2,
               gap: 2
             }}>
               <CircularProgress color="secondary" size={48} />

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -15,8 +16,11 @@ import {
   Box,
   Paper,
   Divider,
-  Chip
+  Chip,
+  Tooltip,
+  IconButton
 } from '@mui/material'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { Img } from '@bsv/uhrp-react'
 import { toast } from 'react-toastify'
 import useStyles from './home-style'
@@ -57,6 +61,11 @@ const parseIncomingMetadata = (metadata: unknown): Record<string, unknown> | und
 const getMetadataString = (metadata: Record<string, unknown> | undefined, key: string): string | undefined => {
   const value = metadata?.[key]
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+const truncateAssetId = (assetId: string, prefix = 8, suffix = 8): string => {
+  if (!assetId || assetId.length <= prefix + suffix + 3) return assetId
+  return `${assetId.slice(0, prefix)}...${assetId.slice(-suffix)}`
 }
 
 const Home: React.FC<HomeProps> = ({ history }) => {
@@ -217,16 +226,26 @@ const Home: React.FC<HomeProps> = ({ history }) => {
     return Object.values(incomingAmountsByAsset).reduce((sum, amount) => sum + (Number(amount) || 0), 0)
   }, [incomingAmountsByAsset])
 
+  const copyAssetId = async (event: React.MouseEvent, value: string) => {
+    event.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success('Asset ID copied')
+    } catch {
+      toast.error('Failed to copy Asset ID')
+    }
+  }
+
   return (
     <div>
       <Container maxWidth="lg" sx={{ pb: 8 }}>
         <Grid container spacing={4} className={classes.title}>
           <Grid item xs={12} md={7}>
             <Typography variant="h2" sx={{ fontWeight: 700 }}>
-              Asset Vault
+              BTMS Asset Vault
             </Typography>
             <Typography variant="h6" color="text.secondary" sx={{ mt: 1, maxWidth: 520 }}>
-              Manage real-world assets with instant transfers, incoming receipts, and transparent history.
+              Manage BTMS assets with instant transfers, incoming receipts, and transparent history.
             </Typography>
             <Box sx={{ display: 'flex', gap: 2, mt: 3, flexWrap: 'wrap' }}>
               <Button component={Link} to="/mint" variant="contained" color="primary">
@@ -302,7 +321,6 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                     const walletBalance = token.balance
 
                     const hasPendingIncoming = !!token.hasPendingIncoming || incomingCount > 0
-                    const incomingOnly = !hasWalletBalance && hasPendingIncoming
 
                     const displayBalance = walletBalance
                     const incomingBadge = hasPendingIncoming ? incomingCount : 0
@@ -326,8 +344,8 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                             <Box
                               sx={{
-                                width: 40,
-                                height: 40,
+                                width: 48,
+                                height: 48,
                                 borderRadius: '12px',
                                 background: 'rgba(15, 23, 42, 0.08)',
                                 display: 'flex',
@@ -345,20 +363,24 @@ const Home: React.FC<HomeProps> = ({ history }) => {
                               )}
                             </Box>
                             <Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                  {token.name || token.assetId}
-                                </Typography>
-                                {incomingOnly ? (
-                                  <Chip label="Incoming only" size="small" color="warning" />
-                                ) : hasPendingIncoming ? (
-                                  <Chip label="Owned + incoming" size="small" color="secondary" />
-                                ) : (
-                                  <Chip label="Owned" size="small" variant="outlined" />
-                                )}
-                              </Box>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                {token.name || token.assetId}
+                              </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                {token.assetId}
+                                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Tooltip title={token.assetId}>
+                                    <span style={{ fontFamily: 'monospace' }}>{truncateAssetId(token.assetId)}</span>
+                                  </Tooltip>
+                                  <Tooltip title="Copy Asset ID">
+                                    <IconButton
+                                      size="small"
+                                      sx={{ p: 0.25 }}
+                                      onClick={(event) => void copyAssetId(event, token.assetId)}
+                                    >
+                                      <ContentCopyIcon sx={{ fontSize: 12 }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
                               </Typography>
                               {token.description && (
                                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>

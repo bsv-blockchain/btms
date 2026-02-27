@@ -18,7 +18,11 @@ const useStyles = makeStyles((theme: Theme) => ({
     paddingBottom: '1.5em'
   },
   link: {
-    textDecoration: 'none'
+    textDecoration: 'none',
+    transition: 'background-color 0.2s ease',
+    '&:hover': {
+      backgroundColor: 'rgba(15, 23, 42, 0.04)'
+    }
   },
   send_icon: {
     paddingLeft: '0.3em'
