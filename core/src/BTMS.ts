@@ -429,6 +429,15 @@ export class BTMS {
         unlockingScriptLength: 74,
         inputDescription: `Spend ${u.token.amount} tokens`
       }))
+
+      const completeInputBeef = inputBeef instanceof Beef
+        ? await this.ensureCompleteInputBeef(
+          selected.map(u => ({ txid: u.txid, outputIndex: u.outputIndex })),
+          inputBeef,
+          assetId
+        )
+        : inputBeef
+
       // Create the action with BEEF from overlay
       const createArgs: CreateActionArgs = {
         description: `Send ${amount} tokens to ${recipient.slice(0, 8)}...`,
@@ -440,7 +449,7 @@ export class BTMS {
           `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes,
           `${BTMS_LABEL_PREFIX}counterparty ${recipient}` as LabelStringUnder300Bytes
         ],
-        inputBEEF: inputBeef.toBinary(),
+        inputBEEF: completeInputBeef.toBinary(),
         inputs,
         outputs,
         options: {
@@ -624,6 +633,15 @@ export class BTMS {
           ? `Burn ${amountToBurn} tokens (from UTXO with ${u.token.amount})`
           : `Input ${u.token.amount} tokens for burn`
       }))
+
+      const completeInputBeef = inputBeef instanceof Beef
+        ? await this.ensureCompleteInputBeef(
+          selected.map(u => ({ txid: u.txid, outputIndex: u.outputIndex })),
+          inputBeef,
+          assetId
+        )
+        : inputBeef
+
       // Create the action
       const createArgs: CreateActionArgs = {
         description: `Burn ${amountToBurn} tokens of ${assetId.slice(0, 8)}...`,
@@ -635,7 +653,7 @@ export class BTMS {
           `${BTMS_LABEL_PREFIX}assetId ${assetId}` as LabelStringUnder300Bytes,
           `${BTMS_LABEL_PREFIX}counterparty ${counterparty}` as LabelStringUnder300Bytes
         ],
-        inputBEEF: inputBeef.toBinary(),
+        inputBEEF: completeInputBeef.toBinary(),
         inputs,
         outputs,
         options: {
@@ -914,6 +932,13 @@ export class BTMS {
         throw new Error('Missing BEEF data required to refund token')
       }
 
+      const completeInputBeef = inputBeef instanceof Beef
+        ? await this.ensureCompleteInputBeef(
+          [{ txid: token.txid, outputIndex: token.outputIndex }],
+          inputBeef
+        )
+        : inputBeef
+
       // Validate ability to unlock this token
       const { keyID } = parseCustomInstructions(
         token.customInstructions,
@@ -992,7 +1017,7 @@ export class BTMS {
           `${BTMS_LABEL_PREFIX}assetId ${token.assetId}` as LabelStringUnder300Bytes,
           `${BTMS_LABEL_PREFIX}counterparty ${token.sender}` as LabelStringUnder300Bytes
         ],
-        inputBEEF: inputBeef.toBinary(),
+        inputBEEF: completeInputBeef.toBinary(),
         inputs,
         outputs,
         options: {
@@ -1901,6 +1926,74 @@ export class BTMS {
     }
 
     return { tx: signResult.tx, txid }
+  }
+
+  /**
+   * Ensure a createAction inputBEEF is complete and non-txid-only for required inputs.
+   */
+  private async ensureCompleteInputBeef(
+    requiredInputs: Array<{ txid: TXIDHexString; outputIndex: number }>,
+    baseBeef: Beef,
+    assetIdForRecovery?: string
+  ): Promise<Beef> {
+    const merged = baseBeef.clone()
+
+    const validate = (beef: Beef): { ok: true } | { ok: false; reason: string } => {
+      const txidOnlyTxs = beef.txs.filter((tx: any) => tx?.isTxidOnly).map((tx: any) => tx.txid)
+      if (txidOnlyTxs.length > 0) {
+        return {
+          ok: false,
+          reason: `BEEF contains txid-only entries: ${txidOnlyTxs.slice(0, 3).join(', ')}`
+        }
+      }
+
+      const beefBin = beef.toBinary()
+      for (const input of requiredInputs) {
+        const beefTx = beef.findTxid(input.txid)
+        if (!beefTx || (beefTx as any).isTxidOnly) {
+          return {
+            ok: false,
+            reason: `Missing complete transaction for input ${input.txid}.${input.outputIndex}`
+          }
+        }
+
+        try {
+          const tx = Transaction.fromBEEF(beefBin, input.txid)
+          if (tx.outputs[input.outputIndex] === undefined) {
+            return {
+              ok: false,
+              reason: `Missing referenced output ${input.txid}.${input.outputIndex}`
+            }
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            reason: `Unresolvable ancestry for ${input.txid}.${input.outputIndex}: ${error instanceof Error ? error.message : 'unknown error'}`
+          }
+        }
+      }
+
+      return { ok: true }
+    }
+
+    let validation = validate(merged)
+    if (validation.ok) {
+      return merged
+    }
+
+    // Recovery path: merge wallet-provided BEEF for the same asset (when available).
+    if (assetIdForRecovery && BTMSToken.isValidAssetId(assetIdForRecovery)) {
+      const { beef: walletBeef } = await this.getSpendableTokens(assetIdForRecovery, true)
+      if (walletBeef) {
+        merged.mergeBeef(walletBeef)
+      }
+      validation = validate(merged)
+      if (validation.ok) {
+        return merged
+      }
+    }
+
+    throw new Error(`Unable to build complete inputBEEF for createAction: ${validation.reason}`)
   }
 
   /**
