@@ -1,7 +1,7 @@
 // frontend/src/pages/Tokens/index.tsx
 
 import React, { useMemo, useState, useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useHistory, useParams } from 'react-router-dom'
 import {
   Grid,
   Typography,
@@ -84,6 +84,7 @@ const getRangeMs = (range: BalanceRange) => {
 }
 
 const WOC_BASE_URL = 'https://whatsonchain.com/tx/'
+const SHOW_TEST_CLEAN_BAD_OUTPUTS = false
 
 const formatDate = (tx: TokenTransaction) => {
   if (tx.timestamp) {
@@ -99,6 +100,7 @@ const shortTxid = (txid: string) => {
 
 const Tokens: React.FC = () => {
   const classes = useStyles()
+  const history = useHistory()
   const { assetId } = useParams<{ assetId?: string }>()
   let tokenID = assetId || ''
   if (tokenID) {
@@ -368,20 +370,22 @@ const Tokens: React.FC = () => {
               <Box sx={{ display: 'flex', gap: 1.5 }}>
                 <Send assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
                 <Receive assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
-                <Burn assetId={token.assetId} asset={token} onReloadNeeded={refresh} />
+                <Burn assetId={token.assetId} asset={token} onReloadNeeded={() => history.push('/')} />
               </Box>
-              <Box sx={{ mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  size="small"
-                  startIcon={<DeleteSweepIcon />}
-                  onClick={handleCleanBadOutputs}
-                  disabled={cleaningBadOutputs}
-                >
-                  {cleaningBadOutputs ? 'Cleaning...' : 'Remove corrupted outputs'}
-                </Button>
-              </Box>
+              {SHOW_TEST_CLEAN_BAD_OUTPUTS && (
+                <Box sx={{ mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size="small"
+                    startIcon={<DeleteSweepIcon />}
+                    onClick={handleCleanBadOutputs}
+                    disabled={cleaningBadOutputs}
+                  >
+                    {cleaningBadOutputs ? 'Cleaning...' : 'Remove corrupted outputs'}
+                  </Button>
+                </Box>
+              )}
             </Grid>
 
             {/* Right side - Balance history graph */}
@@ -497,7 +501,7 @@ const Tokens: React.FC = () => {
                 <TableRow>
                   <TableCell align="left">Date</TableCell>
                   <TableCell align="left">Transaction Amount</TableCell>
-                  <TableCell align="right">Counterparty</TableCell>
+                  <TableCell align="left">Counterparty</TableCell>
                   <TableCell align="right">Transaction ID</TableCell>
                 </TableRow>
               </TableHead>
@@ -549,14 +553,23 @@ const Tokens: React.FC = () => {
                           </Box>
                         </Box>
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="left">
                         {tx.counterparty && tx.counterparty !== 'N/A' ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <Box
+                            sx={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              maxWidth: 280,
+                              '& .MuiTypography-body2': {
+                                color: 'text.secondary !important'
+                              }
+                            }}
+                          >
                             <IdentityCard identityKey={tx.counterparty} />
                           </Box>
                         ) : (
                           <Typography variant="body2" color="text.secondary">
-                            N/A
+                            System
                           </Typography>
                         )}
                       </TableCell>
