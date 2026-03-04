@@ -11,9 +11,8 @@ import {
   type BTMSTransaction,
   type IncomingToken
 } from '@bsv/btms'
-import { type WalletInterface, PubKeyHex, CommsLayer } from '@bsv/sdk'
+import { type WalletInterface, PubKeyHex, CommsLayer, WalletClient } from '@bsv/sdk'
 import { MessageBoxClient } from '@bsv/message-box-client'
-import BabbageGo from '@babbage/go'
 
 export type { BTMSAsset, IncomingToken, BTMSTransaction }
 
@@ -58,12 +57,7 @@ function createCommsAdapter(messageBoxClient: MessageBoxClient, wallet: WalletIn
   }
 }
 
-export const walletClient = new BabbageGo(undefined, {
-  monetization: {
-    developerIdentity: '02a064784ebb435e87c3961745b01e3564d41149ea1291d1a73783d1b7b3a7a220',
-    developerFeeSats: 400
-  }
-})
+export const walletClient = new WalletClient('auto')
 const messageBoxClient = new MessageBoxClient({
   host: DEFAULT_MESSAGEBOX_HOST,
   walletClient

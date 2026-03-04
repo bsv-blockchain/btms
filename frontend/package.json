@@ -4,7 +4,6 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "@babbage/go": "^0.1.16",
     "@bsv/btms": "^1.0.1",
     "@bsv/identity-react": "^1.1.14",
     "@bsv/message-box-client": "^2.0.4",
